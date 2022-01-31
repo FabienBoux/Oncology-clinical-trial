@@ -75,7 +75,8 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
 
 
 if __name__ == '__main__':
-    folder = 'C:\\Users\\Fabien Boux\\Code\\Oncology-clinical-trial\\data\\dummy'
+    # TODO: move this variable in config file
+    folder = "C:\\Users\\Fabien Boux\\Code\\Oncology-clinical-trial\\data\\dummy"
 
     generate_dummy_metadata(os.path.join(folder, 'metadata.xlsx'))
 
