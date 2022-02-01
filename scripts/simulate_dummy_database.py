@@ -1,4 +1,5 @@
 import os
+import datetime
 
 import pandas as pd
 import numpy as np
@@ -7,7 +8,11 @@ import numpy as np
 def generate_dummy_metadata(filename, nb_patients=200, nb_groups=2, ratio=.5, nb_meta=10):
     # TODO: use the ratio parameter
     metadata = pd.DataFrame({'Patient': ['%03d' % i for i in range(1, nb_patients + 1)],
-                             'Group': np.random.randint(0, nb_groups, nb_patients)})
+                             'Group': np.random.randint(0, nb_groups, nb_patients),
+                             'Start': datetime.date(2000, 1, 1) + np.array(
+                                 [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)]),
+                             'End': datetime.date(2001, 1, 1) + np.array(
+                                 [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)])})
 
     for m in np.arange(nb_meta):
 
