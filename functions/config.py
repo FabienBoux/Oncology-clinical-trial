@@ -5,8 +5,8 @@ import pandas as pd
 
 
 class Config:
-    def __init__(self):
-        self.filename = 'config.ini'
+    def __init__(self, filename='config.ini'):
+        self.filename = filename
         self.pathfile = os.path.join(os.path.split(os.path.dirname(os.path.realpath(__file__)))[0], self.filename)
 
         self.config = configparser.ConfigParser(converters={'list': lambda x: [i.strip() for i in x.split(',')]})
@@ -36,11 +36,22 @@ class Config:
 
     def get_value(self, key, section=None):
         if section is not None:
-            return ast.literal_eval(self.config[section][key])
+            val = self.config[section][key]
+            return ast.literal_eval(val) if (val.startswith('[') & val.startswith(']')) else val
         else:
             for section in self.config.sections():
                 if key in self.config[section]:
-                    return ast.literal_eval(self.config[section][key])
+                    val = self.config[section][key]
+                    return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
+
+    def remove_value(self, key, section=None):
+        if section is not None:
+            if key in self.config[section]:
+                self.config.remove_option(section, key)
+        else:
+            for section in self.config.sections():
+                if key in self.config[section]:
+                    return self.config.remove_option(section, key)
 
     def set_value(self, val, key, section=None):
         if section is None:
@@ -49,9 +60,8 @@ class Config:
             val = str(val)
 
         if not self.is_section(section):
-            self.config._sections[section] = {key: val}
-        else:
-            self.config[section][key] = val
+            self.config.add_section(section)
+        self.config.set(section, key, val)
 
     def extract_config_values(self, key):
         if key == 'list_metadata':

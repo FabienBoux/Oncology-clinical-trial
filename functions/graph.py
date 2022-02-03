@@ -1,4 +1,6 @@
+from lifelines import CoxPHFitter
 from matplotlib import pyplot as plt
+from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
 
@@ -27,7 +29,7 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
 
     df['Time'] = df['End']
     df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / 30.5
+    df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
@@ -133,7 +135,8 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
 
     if followup_visits is not None:
         ax.set_xticks(
-            [0] + [int(f[1:]) * (7 if f[0] == 'W' else 30.4 if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f in
+            [0] + [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f
+                   in
                    followup_visits])
         ax.set_xticklabels(['0'] + followup_visits)
 
@@ -151,3 +154,91 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.7))
 
     return figure
+
+
+def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=None, n_min=5):
+    metadata = database.get_metadata(which='all')
+
+    df = pd.DataFrame({'Patient': metadata['Patient'].values,
+                       'Group': metadata['Group'].values,
+                       'Start': metadata['Start'].values,
+                       'End': metadata['End'].values,
+                       }).dropna(how='all')
+    df = pd.concat((df, metadata[list_metadata]), axis=1)
+
+    if group is None:
+        group = df['Group'].unique()
+        group = group[:2]
+
+    df['Event'] = ~np.isnat(df['End'])
+    df['End'] = df['End'].fillna(datetime.datetime.now())
+
+    df['Time'] = df['End']
+    df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
+    df['Time'] = df['Time'] / (365 / 12)
+
+    df = df[~(df['Time'].isna())]
+
+    df['Time'].loc[df['Time'] > followup_time] = followup_time
+    df = df.replace(group[0], 0).replace(group[1], 1)
+
+    figure = Figure(1)
+    colors = figure.get_colors()
+    figure.close()
+
+    # Prepare data according to labels of metadata in 'labs'
+    labs = []
+    measure = []
+    lower = []
+    upper = []
+    n_rt = []
+    n_ax = []
+    for i in range(len(list_metadata)):
+        cat = df[list_metadata[i]].dropna().unique()
+
+        for j in cat:
+            v = df[list_metadata[i]] == j
+
+            if ((df[v]['Group'] == 0).sum() > n_min) & ((df[v]['Group'] == 1).sum() > n_min):
+                cph = CoxPHFitter()
+                cph.fit(df[['Group', 'Time', 'Event']][v], duration_col='Time', event_col='Event')
+
+                measure.append(round(cph.params_[0], 2))
+                lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
+                upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
+
+                n_rt.append((df[v]['Group'] == 0).sum())
+                n_ax.append((df[v]['Group'] == 1).sum())
+                labs.append("{}: {}   (n={}/{})".format(list_metadata[i], str(j), (df[v]['Group'] == 0).sum(),
+                                                        (df[v]['Group'] == 1).sum()))
+
+    cph = CoxPHFitter()
+    cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+
+    measure.append(round(cph.params_[0], 2))
+    lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
+    upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
+    labs.append("Overall (n={}/{})".format((df['Group'] == 0).sum(), (df['Group'] == 1).sum()))
+    n_rt.append((df['Group'] == 0).sum())
+    n_ax.append((df['Group'] == 1).sum())
+
+    if model == 'HR':
+        measure = np.exp(measure)
+        lower = np.exp(lower)
+        upper = np.exp(upper)
+
+    p = EffectMeasurePlot(label=labs, effect_measure=measure, lcl=lower, ucl=upper)
+    p.labels(effectmeasure=model, center=(0 if model == "lnHR" else 1))
+    p.colors(pointshape="D", pointcolor=colors[0], errorbarcolor=colors[0])
+
+    x_min = round(max([1.05, (max(upper) * 1.05 if max(upper) > 0 else max(upper) * 0.95)]), 2)
+    x_max = round(min([0.95, (min(lower) * 0.95 if min(lower) > 0 else min(lower) * 1.05)]), 2)
+    ax = p.plot(figsize=(7, 3), t_adjuster=0.09, max_value=x_min, min_value=x_max)
+
+    plt.suptitle("Subgroup", x=-0.1, y=0.98)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(True)
+    ax.spines['left'].set_visible(False)
+
+    return 1
