@@ -45,12 +45,13 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
         nb_lesions = 1 + abs(round(np.random.normal(dist_lesions[0], dist_lesions[1])))
 
         time = np.array([0] * nb_lesions)
-        session = np.array(['S0'] * nb_lesions)
+        session = np.array(['M0'] * nb_lesions)
+        lesion = np.array(['L{}'.format(i) for i in np.arange(nb_lesions)])
 
         data = dict()
         for par in np.arange(nb_param) + 1:
             data['Param {}'.format(par)] = pd.DataFrame(
-                {'Time': time, 'Session': session, 'Value': np.random.random(nb_lesions)})
+                {'Time': time, 'Session': session, 'VOI': lesion, 'Value': np.random.random(nb_lesions)})
 
         # Initial volume and evolution according to a basic model and depending on group
         growth = abs(np.random.normal(2e-3, 1e-3))
@@ -68,10 +69,12 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
 
         for ses in range(len(sessions)):
             time = np.append(time, np.array([sessions[ses]] * nb_lesions))
-            session = np.append(session, np.array(['S{}'.format(ses + 1)] * nb_lesions))
-            volume = np.append(volume, v0 * np.exp(growth * sessions[ses]) * np.exp(- alpha * D_eff))
+            session = np.append(session, np.array(['M{}'.format(ses + 1)] * nb_lesions))
+            lesion = np.append(lesion, np.array(['L{}'.format(i) for i in np.arange(nb_lesions)]))
+            # volume = np.append(volume, v0 * np.exp(growth * sessions[ses]) * np.exp(- alpha * D_eff))
+            volume = np.append(volume, v0 * np.exp((1 - np.exp(- growth * sessions[ses]))) * np.exp(- alpha * D_eff))
 
-        data['Volume'] = pd.DataFrame({'Time': time, 'Session': session, 'Value': volume})
+        data['Volume'] = pd.DataFrame({'Time': time, 'Session': session, 'VOI': lesion, 'Value': volume})
 
         writer = pd.ExcelWriter(os.path.join(data_folder, '%03d.xlsx' % metadata['Patient'][pat]), engine='openpyxl')
         for par in data.keys():

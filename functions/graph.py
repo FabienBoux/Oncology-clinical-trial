@@ -1,5 +1,7 @@
 from lifelines import CoxPHFitter
 from matplotlib import pyplot as plt
+from openpyxl import load_workbook
+from scipy.stats import stats
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
@@ -136,8 +138,7 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
     if followup_visits is not None:
         ax.set_xticks(
             [0] + [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f
-                   in
-                   followup_visits])
+                   in followup_visits])
         ax.set_xticklabels(['0'] + followup_visits)
 
     ax.set_yticks(r2)
@@ -242,3 +243,98 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=N
     ax.spines['left'].set_visible(False)
 
     return 1
+
+
+def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume'):
+    metadata = database.get_metadata()
+    metadata = metadata[['Patient', 'Group']]
+
+    group = list(metadata['Group'].unique())
+
+    figure = Figure(1)
+    figure.set_figsize((1.3, 1))
+    ax = figure.get_axes()[0, 0]
+    colors = figure.get_colors()
+
+    df = pd.DataFrame([])
+
+    patients = database.get_patients()
+    for p in range(len(patients)):
+        volume = patients[p].get_data(metric)
+        lesion = patients[p].get_lesion()
+
+        if (not lesion.empty) & (not volume.empty):
+
+            sessions = volume['Session'].unique()
+            baseline = list(set([x if x.lower() == 'baseline' else x if float(x[1:]) == 0 else None for x in sessions]))
+            baseline.remove(None)
+
+            time = []
+            evolution = pd.DataFrame([])
+            ref = volume[volume['Session'] == baseline[0]]['Value'][lesion.values].sum()
+            for ses in sessions:
+                time.append(volume[volume['Session'] == ses]['Time'].mean() / (365 / 12))
+                evolution.loc[0, ses] = 100 * (
+                        volume[volume['Session'] == ses]['Value'][lesion.values].sum() - ref) / ref
+
+            g = group.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
+            ax.plot(time, evolution.T, '-', color=colors[g], alpha=1 / (len(patients) ** .4))
+
+            evolution.insert(loc=0, column='Group', value=group[g])
+            df = df.append(evolution)
+
+    if visits is None:
+        visits = list(df.columns)
+        visits.remove('Group')
+    else:
+        df = df[['Group'] + [i for i in df.columns if i in df.columns]]
+
+    # TODO
+    # stats.mannwhitneyu()
+
+    for g in range(len(group)):
+        x = np.array(
+            [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f in
+             visits]) / (365 / 12)
+
+        if stat == 'mean':
+            y = df[df['Group'] == group[g]][visits].mean().values
+            err = df[df['Group'] == group[g]][visits].std().values
+
+            ax.plot(x, y, '--', color=colors[g], linewidth=4, label=group[g])
+            ax.errorbar(x, y, err, fmt='none', color=colors[g], elinewidth=2, capsize=10, capthick=2)
+
+            if g == 1:
+                ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
+                            label="Standard deviations")
+
+        else:
+            y = df[df['Group'] == group[g]][visits].median().values
+            err_low = y - df[df['Group'] == group[g]][visits].quantile(.25).values
+            err_high = df[df['Group'] == group[g]][visits].quantile(.75).values - y
+
+            ax.plot(x, y, '--', color=colors[g], linewidth=4, label=group[g])
+            ax.errorbar(x, y, np.vstack([err_low, err_high]), fmt='none', color=colors[g], elinewidth=2, capsize=10,
+                        capthick=2)
+            if g == 1:
+                ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
+                            label="25-75 quantiles")
+
+    # for t in range(1, len(tt)):
+    #     if stat == 'mean':
+    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.45, '  {:.1f}%'.format(100 * (y_rt[t] - y_ax[t]) / y_rt[t]))
+    #     else:
+    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.45, '  {:.1f}%'.format(100 * (z_rt[t] - z_ax[t]) / z_rt[t]))
+    #     if (n_rt[t] > 3) & (n_ax[t] > 3):
+    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.25, ' p = {:.2f}'.format(pval[t]))
+    #     plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.05, 'n = {}$^*$/ {}$^°$'.format(int(n_rt[t]), int(n_ax[t])))
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(visits)
+
+    plt.xlabel('Times (months)')
+    plt.ylabel('Changes in sum of the size of\nlesions compared to baseline (%)')
+    plt.xlim([0, max(x) + 0.05])
+
+    figure.config()
+    return figure
