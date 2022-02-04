@@ -12,7 +12,13 @@ def generate_dummy_metadata(filename, nb_patients=200, nb_groups=2, ratio=.5, nb
                              'Start': datetime.date(2000, 1, 1) + np.array(
                                  [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)]),
                              'End': datetime.date(2001, 1, 1) + np.array(
-                                 [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)])})
+                                 [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)]),
+                             'Event': [True if np.random.random() < .9 else False for i in range(nb_patients)]
+                             })
+
+    metadata['End'] = [
+        metadata['End'][i] - 0.3 * (metadata['End'][i] - metadata['Start'][i])
+        if metadata['Group'][i] == 0 else metadata['End'][i] for i in metadata.index]
 
     for m in np.arange(nb_meta):
 

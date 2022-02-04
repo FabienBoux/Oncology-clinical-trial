@@ -10,4 +10,4 @@ database = Database(config.get_value('database', section='PATH'), idlength=3)
 database.add_resource({'metadata': os.path.join(config.get_value('database', section='PATH'),
                                                 config.get_value('metadata', section='PATH'))})
 
-volumetry_plot(database, stat='median')
+kaplan_meier_plot(database)

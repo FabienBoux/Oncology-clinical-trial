@@ -1,7 +1,9 @@
-from lifelines import CoxPHFitter
+from lifelines import CoxPHFitter, KaplanMeierFitter
+from lifelines.plotting import add_at_risk_counts
 from matplotlib import pyplot as plt
 from openpyxl import load_workbook
 from scipy.stats import stats
+from lifelines.statistics import logrank_test
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
@@ -245,11 +247,12 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=N
     return 1
 
 
-def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume'):
+def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume', groups=None):
     metadata = database.get_metadata()
     metadata = metadata[['Patient', 'Group']]
 
-    group = list(metadata['Group'].unique())
+    if groups is None:
+        groups = sorted(list(metadata['Group'].unique()))
 
     figure = Figure(1)
     figure.set_figsize((1.3, 1))
@@ -277,10 +280,10 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                 evolution.loc[0, ses] = 100 * (
                         volume[volume['Session'] == ses]['Value'][lesion.values].sum() - ref) / ref
 
-            g = group.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
+            g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
             ax.plot(time, evolution.T, '-', color=colors[g], alpha=1 / (len(patients) ** .4))
 
-            evolution.insert(loc=0, column='Group', value=group[g])
+            evolution.insert(loc=0, column='Group', value=groups[g])
             df = df.append(evolution)
 
     if visits is None:
@@ -292,16 +295,16 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     # TODO
     # stats.mannwhitneyu()
 
-    for g in range(len(group)):
+    for g in range(len(groups)):
         x = np.array(
             [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f in
              visits]) / (365 / 12)
 
         if stat == 'mean':
-            y = df[df['Group'] == group[g]][visits].mean().values
-            err = df[df['Group'] == group[g]][visits].std().values
+            y = df[df['Group'] == groups[g]][visits].mean().values
+            err = df[df['Group'] == groups[g]][visits].std().values
 
-            ax.plot(x, y, '--', color=colors[g], linewidth=4, label=group[g])
+            ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Mean group {}".format(groups[g]))
             ax.errorbar(x, y, err, fmt='none', color=colors[g], elinewidth=2, capsize=10, capthick=2)
 
             if g == 1:
@@ -309,11 +312,11 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                             label="Standard deviations")
 
         else:
-            y = df[df['Group'] == group[g]][visits].median().values
-            err_low = y - df[df['Group'] == group[g]][visits].quantile(.25).values
-            err_high = df[df['Group'] == group[g]][visits].quantile(.75).values - y
+            y = df[df['Group'] == groups[g]][visits].median().values
+            err_low = y - df[df['Group'] == groups[g]][visits].quantile(.25).values
+            err_high = df[df['Group'] == groups[g]][visits].quantile(.75).values - y
 
-            ax.plot(x, y, '--', color=colors[g], linewidth=4, label=group[g])
+            ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Median group {}".format(groups[g]))
             ax.errorbar(x, y, np.vstack([err_low, err_high]), fmt='none', color=colors[g], elinewidth=2, capsize=10,
                         capthick=2)
             if g == 1:
@@ -333,8 +336,107 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     ax.set_xticklabels(visits)
 
     plt.xlabel('Times (months)')
-    plt.ylabel('Changes in sum of the size of\nlesions compared to baseline (%)')
+    plt.ylabel('Changes in sum of the size of lesions\ncompared to baseline (%)')
     plt.xlim([0, max(x) + 0.05])
+
+    figure.config()
+    return figure
+
+
+def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None, adjust_ipfs=False, groups=None):
+    cutoff_date = (datetime.datetime.now() if cutoff_date is None
+                   else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
+
+    metadata = database.get_metadata(which='all')
+    df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
+
+    if groups is None:
+        groups = sorted(list(df['Group'].unique()))
+
+    df['End'] = df['End'].fillna(datetime.datetime.now())
+
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
+    df['Time'] = df['Time'] / (365 / 12)
+
+    df = df[~(df['Time'].isna())]
+
+    if followup_time is None:
+        followup_time = df['Time'].max()
+    else:
+        df['Time'].loc[df['Time'] > followup_time] = followup_time
+    # df = df.replace(groups[0], 0).replace(groups[1], 1)
+
+    df['End'] = df['End'].fillna(cutoff_date)
+    df['Event'] = df['Event'].fillna(False)
+
+    if event == 'PFS':
+        pass
+        # patients = database.get_patients()
+        # for p in range(len(patients)):
+        #     df = patients[p].get_data(['RECIST'], norm=True)['RECIST']
+        #     df['Study'] = df['Study'] - df['Study'][df['Session'] == 'Baseline'].values[0]
+        #     if 'PD' in list(df['mRECIST response'].values):
+        #         t = df['Study'][[i for i, x in enumerate(list(df['mRECIST response'].values)) if x == 'PD'][0]]
+        #         data.at[data[data['patient'] == patients[p].id].index[0], 'time'] = t.days / 30.5
+        #         data.at[data[data['patient'] == patients[p].id].index[0], 'event'] = True
+        #     elif (data['patient'] == patients[p].id).any() & adjust_ipfs:
+        #         tt = df['Session'].values[-1]
+        #         tt = (1.5 if (tt.find('W0') >= 0) | (tt.find(
+        #             'Baseline') >= 0) else 3 if tt == 'W6' else 6 if tt == 'M3' else 9 if tt == 'M6' else 12 if tt == 'M9' else inf)
+        #         if data.at[data[data['patient'] == patients[p].id].index[0], 'time'] > tt:
+        #             data.at[data[data['patient'] == patients[p].id].index[0], 'time'] = tt
+        #             data.at[data[data['patient'] == patients[p].id].index[0], 'event'] = False
+
+    results_all = logrank_test(df['Time'][df['Group'] == groups[0]],
+                               df['Time'][df['Group'] == groups[1]],
+                               event_observed_A=df['Event'][df['Group'] == groups[0]],
+                               event_observed_B=df['Event'][df['Group'] == groups[1]])
+
+    figure = Figure()
+    colors = figure.get_colors()
+    ax = figure.get_axes()[0, 0]
+
+    kmf_model = dict()
+    for g in groups:
+        v = df['Group'] == g
+        kmf_model[g] = KaplanMeierFitter(alpha=0.05)
+        kmf_model[g].fit(df['Time'][v], df['Event'][v], label='{} (n={})'.format(g, v.sum()))
+
+        lab = ('>{}'.format(followup_time) if kmf_model[g].median_survival_time_ > followup_time else '{:.2f}'.format(
+            kmf_model[g].median_survival_time_))
+        leg = 'Group {} (n={}): {}= {}\nMedian follow-up time: {:.2f}'.format(g, v.sum(),
+                                                                              ('mPFST' if event == 'PFS' else 'mST'),
+                                                                              lab, df['Time'][v].median())
+        kmf_model[g].plot_survival_function(ax=ax, ci_show=True, show_censors=True, color=colors[groups.index(g)],
+                                            label=leg)
+        ax.plot([kmf_model[g].median_survival_time_, kmf_model[g].median_survival_time_], [0, 0.5],
+                '--', alpha=0.9, color=colors[groups.index(g)])
+
+    ax.plot([0, followup_time], [0.5, 0.5], '--', color="black", alpha=0.9,
+            label=('Median PFS time (mPFST)' if event == 'PFS' else 'Median survival time (mST)'))
+    ax.plot([np.nan], [np.nan], '.', color='k', label='Censored patients')
+
+    # ax.plot(np.nan, np.nan, '-', color='k',
+    #         label='Log-rank test: p={:.2f} (n={})\nwith censored: p={:.2f} (n={})'.format(results.p_value, v.sum(),
+    #                                                                                       results_all.p_value,
+    #                                                                                       len(rt)))
+    ax.plot(np.nan, np.nan, '-', color='k',
+            label='Log-rank test: p={:.2f} (n={})'.format(results_all.p_value, len(v)))
+
+    for i in np.arange(0, 3 * len(groups), 3):
+        ax.lines[i].set_marker('.')
+        ax.lines[i].set_markeredgewidth(0)
+        ax.lines[i].set_markersize(12)
+        ax.lines[i].set_alpha(0.5)
+
+    ax.set_xlabel('Time (months)')
+    ax.set_ylabel(
+        'Intracranial progression-free survival probability' if event == 'iPFS' else 'Survival probability')
+    ax.set_xlim([0, followup_time])
+    ax.set_ylim([0, 1.05])
+    figure.figure.set_figheight(figure.figure.get_figwidth())
+
+    add_at_risk_counts(kmf_model[groups[0]], kmf_model[groups[1]], ax=ax)
 
     figure.config()
     return figure
