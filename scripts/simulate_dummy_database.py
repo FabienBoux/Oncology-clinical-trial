@@ -73,12 +73,14 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
                 [data[list(data.keys())[par - 1]]['Value'].values for par in np.arange(nb_param) + 1]).sum(
                 axis=0)) * D_rt
 
+        alpha_eff = np.random.normal(alpha, alpha / 10)
         for ses in range(len(sessions)):
             time = np.append(time, np.array([sessions[ses]] * nb_lesions))
             session = np.append(session, np.array(['M{}'.format(ses + 1)] * nb_lesions))
             lesion = np.append(lesion, np.array(['L{}'.format(i) for i in np.arange(nb_lesions)]))
             # volume = np.append(volume, v0 * np.exp(growth * sessions[ses]) * np.exp(- alpha * D_eff))
-            volume = np.append(volume, v0 * np.exp((1 - np.exp(- growth * sessions[ses]))) * np.exp(- alpha * D_eff))
+            volume = np.append(volume, v0 * np.exp((1 - np.exp(- growth * sessions[ses])))
+                               * np.exp(- alpha_eff * D_eff))
 
         data['Volume'] = pd.DataFrame({'Time': time, 'Session': session, 'VOI': lesion, 'Value': volume})
 

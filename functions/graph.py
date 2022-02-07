@@ -15,6 +15,8 @@ import pandas as pd
 
 from collections import Counter
 
+from functions.utils import compute_evolution, compute_mRECIST
+
 
 def swimmer_plot(database, followup_time=12, followup_visits=None):
     metadata = database.get_metadata(which='all')
@@ -267,18 +269,8 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
         lesion = patients[p].get_lesion()
 
         if (not lesion.empty) & (not volume.empty):
-
-            sessions = volume['Session'].unique()
-            baseline = list(set([x if x.lower() == 'baseline' else x if float(x[1:]) == 0 else None for x in sessions]))
-            baseline.remove(None)
-
-            time = []
-            evolution = pd.DataFrame([])
-            ref = volume[volume['Session'] == baseline[0]]['Value'][lesion.values].sum()
-            for ses in sessions:
-                time.append(volume[volume['Session'] == ses]['Time'].mean() / (365 / 12))
-                evolution.loc[0, ses] = 100 * (
-                        volume[volume['Session'] == ses]['Value'][lesion.values].sum() - ref) / ref
+            idx = [True if x in lesion[lesion == True].index else False for x in list(volume['VOI'].values)]
+            time, evolution = compute_evolution(volume[idx])
 
             g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
             ax.plot(time, evolution.T, '-', color=colors[g], alpha=1 / (len(patients) ** .4))
@@ -313,15 +305,15 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
 
         else:
             y = df[df['Group'] == groups[g]][visits].median().values
-            err_low = y - df[df['Group'] == groups[g]][visits].quantile(.25).values
-            err_high = df[df['Group'] == groups[g]][visits].quantile(.75).values - y
+            err_low = y - df[df['Group'] == groups[g]][visits].quantile(.2).values
+            err_high = df[df['Group'] == groups[g]][visits].quantile(.8).values - y
 
             ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Median group {}".format(groups[g]))
             ax.errorbar(x, y, np.vstack([err_low, err_high]), fmt='none', color=colors[g], elinewidth=2, capsize=10,
                         capthick=2)
             if g == 1:
                 ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
-                            label="25-75 quantiles")
+                            label="20-80 quantiles")
 
     # for t in range(1, len(tt)):
     #     if stat == 'mean':
@@ -439,4 +431,65 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     add_at_risk_counts(kmf_model[groups[0]], kmf_model[groups[1]], ax=ax)
 
     figure.config()
+    return figure
+
+
+def response_rate_plot(database, visits=None, criteria=None, cutoff_date=None, metric='Volume', groups=None):
+    cutoff_date = (datetime.datetime.now() if cutoff_date is None
+                   else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
+
+    metadata = database.get_metadata(which='all')
+
+    if groups is None:
+        groups = sorted(list(metadata['Group'].unique()))
+
+    df = pd.DataFrame([])
+    patients = database.get_patients()
+    for p in range(len(patients)):
+        volume = patients[p].get_data(metric)
+        lesion = patients[p].get_lesion()
+
+        if (not lesion.empty) & (not volume.empty):
+            _, response = compute_mRECIST(volume, lesion)
+
+            g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
+            response.insert(loc=0, column='Group', value=groups[g])
+
+            df = df.append(response)
+
+    if visits is None:
+        visits = list(df.columns)
+        visits.remove('Group')
+    else:
+        df = df[['Group'] + [i for i in df.columns if i in df.columns]]
+
+    figure = Figure(1)
+    figure.set_figsize((1.3, 1))
+    ax = figure.get_axes()[0, 0]
+    colors = figure.get_colors()
+
+    labels = list(df.columns)[2:]
+    width = .8
+    x = np.arange(len(labels))
+
+    for g in range(len(groups)):
+        ax.bar(x - width / 2 + g * width / len(groups),
+               ((df[labels][df['Group'] == groups[g]] == 'PR') | (
+                       df[labels][df['Group'] == groups[g]] == 'CR')).sum().values,
+               width / len(groups), color=colors[g], label='Group: ' + groups[g])
+        ax.bar(x - width / 2 + g * width / len(groups),
+               (df[labels][df['Group'] == groups[g]] == 'CR').sum().values,
+               width / len(groups), color=colors[g], edgecolor='black', hatch='//')
+
+    ax.bar(np.nan, np.nan, width, color='white', edgecolor='black', hatch='//', label='CR')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+
+    ax.set_xlabel('Sessions')
+    ax.set_ylabel('Number of responses (PR or CR)')
+
+    figure.config()
+    # figure.save('test.png')
+    # figure.close()
     return figure
