@@ -2,6 +2,27 @@ import numpy as np
 import pandas as pd
 
 
+def visit_to_time(visits):
+    if type(visits) is list:
+        return [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
+                for f in visits]
+    if type(visits) is str:
+        f = visits
+        return (int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1))
+
+
+# def time_to_visit(times):
+#     if type(times) is list:
+#         return [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
+#                 for f in times]
+#         return [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
+#                 for f in times]
+#         return ['Y' +  if f > 365 else 'M' if f > 30 else 'W' if f > 7 else 'D' for f in times]
+#     if type(times) is str:
+#         f = times
+#         return (int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1))
+
+
 def compute_sum(volume):
     volume.groupby(['Time', 'Value'])
 
@@ -45,14 +66,14 @@ def compute_evolution(volume, reference='baseline'):
     return time, evolution
 
 
-def compute_mRECIST(volume, lesion):
-    idx = [True if x in lesion[lesion == True].index else False for x in list(volume['VOI'].values)]
+def compute_revised_RECIST(volume, lesion):
+    idx = [True if x in lesion[lesion].index else False for x in list(volume['VOI'].values)]
     time, evol_bl = compute_evolution(volume[idx], reference='baseline')
     time, evol_nd = compute_evolution(volume[idx], reference='nadir')
     _, vol = compute_sum(volume[idx])
     val = vol.copy().values[0]
     for i in range(1, len(vol.columns)):
-        vol[vol.columns[i]] = val[i] - val[i-1]
+        vol[vol.columns[i]] = val[i] - val[:i].min()
 
     for ses in evol_nd.columns:
         if (evol_nd[ses].values[0] >= 20) & (vol[ses] > 5).any():

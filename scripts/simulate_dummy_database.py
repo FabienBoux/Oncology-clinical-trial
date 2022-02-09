@@ -5,20 +5,27 @@ import pandas as pd
 import numpy as np
 
 
-def generate_dummy_metadata(filename, nb_patients=200, nb_groups=2, ratio=.5, nb_meta=10):
+def generate_dummy_metadata(filename, nb_patients=200, nb_groups=2, ratio=.5, nb_meta=10, ongoing=True):
     # TODO: use the ratio parameter
     metadata = pd.DataFrame({'Patient': ['%03d' % i for i in range(1, nb_patients + 1)],
                              'Group': np.random.randint(0, nb_groups, nb_patients),
-                             'Start': datetime.date(2000, 1, 1) + np.array(
+                             'Start': datetime.datetime.now() - datetime.timedelta(days=1.5 * 365) + np.array(
+                                 [datetime.timedelta(np.random.randint(1, 183)) for i in range(nb_patients)]),
+                             'End': datetime.datetime.now() - datetime.timedelta(days=1 * 365) + np.array(
                                  [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)]),
-                             'End': datetime.date(2001, 1, 1) + np.array(
-                                 [datetime.timedelta(np.random.randint(1, 365)) for i in range(nb_patients)]),
-                             'Event': [True if np.random.random() < .9 else False for i in range(nb_patients)]
+                             'Event': [True if np.random.random() < .8 else False for i in range(nb_patients)]
                              })
 
     metadata['End'] = [
         metadata['End'][i] - 0.3 * (metadata['End'][i] - metadata['Start'][i])
         if metadata['Group'][i] == 0 else metadata['End'][i] for i in metadata.index]
+
+    if ongoing:
+        max = (metadata['End'] - metadata['Start']).max()
+        metadata['End'] = [
+            metadata['End'][i] if np.random.random() / 2 < (metadata['End'][i] - metadata['Start'][i]) / max
+            else np.nan for i in metadata.index]
+        metadata.loc[metadata['End'].isna(), 'Event'] = np.nan
 
     for m in np.arange(nb_meta):
 
@@ -38,7 +45,7 @@ def generate_dummy_metadata(filename, nb_patients=200, nb_groups=2, ratio=.5, nb
         metadata.to_excel(filename, index=False)
 
 
-def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np.arange(30, 365, 30),
+def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, visit_times=np.arange(30, 365, 30),
                         dist_lesions=(9, 4)):
     if data_folder is None:
         data_folder = os.path.dirname(metadata_file)
@@ -46,6 +53,7 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
         os.makedirs(data_folder)
 
     metadata = pd.read_excel(metadata_file)
+    metadata['End']=metadata['End'].fillna(datetime.datetime.now())
 
     for pat in np.arange(len(metadata)):
         nb_lesions = 1 + abs(round(np.random.normal(dist_lesions[0], dist_lesions[1])))
@@ -74,13 +82,18 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, sessions=np
                 axis=0)) * D_rt
 
         alpha_eff = np.random.normal(alpha, alpha / 10)
-        for ses in range(len(sessions)):
-            time = np.append(time, np.array([sessions[ses]] * nb_lesions))
-            session = np.append(session, np.array(['M{}'.format(ses + 1)] * nb_lesions))
-            lesion = np.append(lesion, np.array(['L{}'.format(i) for i in np.arange(nb_lesions)]))
-            # volume = np.append(volume, v0 * np.exp(growth * sessions[ses]) * np.exp(- alpha * D_eff))
-            volume = np.append(volume, v0 * np.exp((1 - np.exp(- growth * sessions[ses])))
-                               * np.exp(- alpha_eff * D_eff))
+        for ses in range(len(visit_times)):
+            if visit_times[ses] < (metadata.loc[pat]['End'] - metadata.loc[pat]['Start']).days:
+                if np.random.random() > .02:
+                    time = np.append(time, np.array([visit_times[ses]] * nb_lesions))
+                    session = np.append(session, np.array(['M{}'.format(ses + 1)] * nb_lesions))
+                    lesion = np.append(lesion, np.array(['L{}'.format(i) for i in np.arange(nb_lesions)]))
+                    # volume = np.append(volume, v0 * np.exp(growth * sessions[ses]) * np.exp(- alpha * D_eff))
+                    # if np.random.random() < 0.03:
+                    #     volume = np.append(volume, np.array([np.nan] * nb_lesions))
+                    # else:
+                    volume = np.append(volume, v0 * np.exp((1 - np.exp(- growth * visit_times[ses])))
+                                       * np.exp(- alpha_eff * D_eff))
 
         data['Volume'] = pd.DataFrame({'Time': time, 'Session': session, 'VOI': lesion, 'Value': volume})
 
@@ -96,5 +109,4 @@ if __name__ == '__main__':
 
     generate_dummy_metadata(os.path.join(folder, 'metadata.xlsx'))
 
-    generate_dummy_data(metadata_file=os.path.join(folder, 'metadata.xlsx'),
-                        data_folder=os.path.join(folder, 'data'))
+    generate_dummy_data(metadata_file=os.path.join(folder, 'metadata.xlsx'), data_folder=os.path.join(folder, 'data'))

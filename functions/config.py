@@ -73,4 +73,13 @@ class Config:
 
             self.set_value(val, key='list_metadata', section='METADATA')
 
+        if key == 'followup':
+            metadata = pd.read_excel(self.get_value('metadata', section='PATH'))
+
+            val = list(metadata.columns)
+            val.remove('Patient')
+            val.remove('Group')
+
+            self.set_value(val, key='list_metadata', section='METADATA')
+
         return val

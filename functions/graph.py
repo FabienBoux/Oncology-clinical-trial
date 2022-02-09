@@ -7,7 +7,6 @@ from lifelines.statistics import logrank_test
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
-
 import os
 import datetime
 import numpy as np
@@ -15,33 +14,38 @@ import pandas as pd
 
 from collections import Counter
 
-from functions.utils import compute_evolution, compute_mRECIST
+from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time
 
 
-def swimmer_plot(database, followup_time=12, followup_visits=None):
+def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume'):
     metadata = database.get_metadata(which='all')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
                        'Group': metadata['Group'].values,
                        'Start': metadata['Start'].values,
                        'End': metadata['End'].values,
+                       'Event': metadata['Event'].values,
                        }).dropna(how='all')
 
     if 'Expected' in df.columns:
         pd.concat((df, metadata['Expected']), axis=1)
 
-    df['Event'] = ~np.isnat(df['End'])
     df['End'] = df['End'].fillna(datetime.datetime.now())
 
-    df['Time'] = df['End']
+    df['Time'] = df['End'].copy()
     df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
     df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
+    if followup_time is None:
+        followup_time = df['Time'].max()
+    else:
+        df.loc[df['Time'] > followup_time, 'Time'] = followup_time
+
     # Plot
     figure = Figure(1)
-    figure.set_figsize((1.5, len(df) / 20))
+    figure.set_figsize((1, len(df) / 30))
     ax = figure.get_axes()[0, 0]
     colors = figure.get_colors()
 
@@ -55,7 +59,7 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
         v = ~df['Time'].isna()
         y1 = [np.nan] * v.sum()
     y2 = df['Time'][v]
-    pats = df[v].reset_index(drop=True)
+    patient_ids = df['Patient'][v]
 
     barWidth = 0.5
     r2 = np.arange(len(y1))
@@ -70,65 +74,56 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
     #     r1[-(jumps[i]):] = r1[-(jumps[i]):] + 1
     #     r2[-(jumps[i]):] = r2[-(jumps[i]):] + 1
 
-    ev = df['Event'][v].values | (df['Time'][v].values > followup_time)
+    censored = df['Event'][v].isna()
 
     for g in range(len(df['Group'].unique())):
         v_group = np.array([True if df['Group'][p] == df['Group'].unique()[g] else False for p in df[v].index])
 
         ax.barh(r2[v_group], y2[v_group], height=barWidth, color=colors[g], alpha=0.65,
                 label='Group: {}'.format(df['Group'].unique()[g]))
-        ax.plot(y2[v_group & ~ev], r2[v_group & ~ev], "_", color='black')
-        ax.plot(y2[v_group & ~ev] + 0.1, r2[v_group & ~ev], ">", color='black')
+        ax.plot(y2[v_group & censored], r2[v_group & censored], "_", color='black')
+        ax.plot(y2[v_group & censored] + followup_time * .01, r2[v_group & censored], ">", color='black')
 
         if 'Expected' in df.columns:
             ax.barh(r1, y1, height=barWidth / 2, color=['gray'] * len(y1), alpha=0.5,
                     label="Expected survival (if available)")
 
-    # TODO: add responses
-    # for p in range(len(r1)):
-    #     t = None
-    #     if pats.loc[p]['patient'] + '.xlsx' in os.listdir(database.folders['data']):
-    #         dat = pd.read_excel(os.path.join(database.folders['data'], pats.loc[p]['patient'] + '.xlsx'),
-    #                             sheet_name='RECIST')
-    #         for i in ["W0_1h", "W0_4h", "Fr6"]:
-    #             dat = dat[dat['Session'] != i]
-    #         dat = dat.reset_index(drop=True)
-    #
-    #         previous_resp = ''
-    #         for s in range(1, len(dat['Session'])):
-    #             resp = dat['mRECIST response'][s]
-    #             t = (1.5 if dat['Session'][s] == 'W6' else 3 if dat['Session'][s] == 'M3' else
-    #             6 if dat['Session'][s] == 'M6' else 9 if dat['Session'][s] == 'M9' else
-    #             12 if dat['Session'][s] == 'M12' else None)
-    #
-    #             if resp == 'PR':
-    #                 ax.plot(t, r2[p], '.', color='green')
-    #             if resp == 'CR':
-    #                 ax.plot(t, r2[p], 'h', color='green')
-    #             if resp == 'PD':
-    #                 ax.plot(t, r2[p], '*', color='red')
-    #
-    #             if ((resp == 'PR') | (resp == 'CR')) & ((previous_resp == 'PR') | (previous_resp == 'CR')):
-    #                 ax.plot([prev_t, t], [r2[p], r2[p]], color='green')
-    #             if (resp == 'PD') & (previous_resp == 'PD'):
-    #                 ax.plot([prev_t, t], [r2[p], r2[p]], color='red')
-    #
-    #             previous_resp = resp
-    #             prev_t = t
-    #
-    #         if not t is None:
-    #             if t == 1.5:
-    #                 if (y2[p] - t) > 1.5:
-    #                     ax.plot(t + 1.5, r2[p], color='black', marker='$?$')
-    #             else:
-    #                 if (y2[p] - t) > 3:
-    #                     ax.plot(t + 3, r2[p], color='black', marker='$?$')
-    #                 if (y2[p] > 12) & (t < 12):
-    #                     ax.plot(12, r2[p], color='black', marker='$?$')
-    #
-    #     if (t is None) & (y2[p] >= 1.5):
-    #         tt = [x for x in [1.5, 3, 6, 9, 12] if x <= y2[p]]
-    #         ax.scatter(tt, [r2[p]] * len(tt), color='black', marker='$?$')
+    patients = database.get_patients(patient_ids)
+    for p in range(len(r1)):
+        volume = patients[p].get_data(metric)
+        lesion = patients[p].get_lesion()
+
+        flwt = followup_visits.copy()
+        if (not lesion.empty) & (not volume.empty):
+            _, response = compute_revised_RECIST(volume, lesion)
+
+            previous_resp = ''
+            for s in response.columns[1:]:
+                resp = response[s].values[0]
+                t = visit_to_time(s) / (365 / 12)
+                if flwt is not None:
+                    if s in flwt:
+                        flwt.remove(s)
+
+                if resp == 'PR':
+                    ax.plot(t, r2[p], '.', color='green')
+                if resp == 'CR':
+                    ax.plot(t, r2[p], 'h', color='green')
+                if resp == 'PD':
+                    ax.plot(t, r2[p], '*', color='red')
+
+                if ((resp == 'PR') | (resp == 'CR')) & ((previous_resp == 'PR') | (previous_resp == 'CR')):
+                    ax.plot([prev_t, t], [r2[p], r2[p]], color='green')
+                if (resp == 'PD') & (previous_resp == 'PD'):
+                    ax.plot([prev_t, t], [r2[p], r2[p]], color='red')
+
+                previous_resp = resp
+                prev_t = t
+
+            if followup_visits is not None:
+                if flwt:
+                    tt = np.array([x for x in visit_to_time(flwt) if (x <= y2[p] * (365 / 12)) & (x > 0)]) / (365 / 12)
+                    ax.scatter(tt, [r2[p]] * len(tt), color='black', marker='$?$', zorder=20)
 
     ax.plot(np.nan, np.nan, ">", color='black', label='Censored patient')
     ax.plot(np.nan, np.nan, '.', color='green', label='Partial Response (PR)')
@@ -140,9 +135,7 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
                label='Absence of response or progression\ncorresponds to a stabilization')
 
     if followup_visits is not None:
-        ax.set_xticks(
-            [0] + [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f
-                   in followup_visits])
+        ax.set_xticks([0] + list(np.array(visit_to_time(followup_visits)) / (365 / 12)))
         ax.set_xticklabels(['0'] + followup_visits)
 
     ax.set_yticks(r2)
@@ -161,13 +154,14 @@ def swimmer_plot(database, followup_time=12, followup_visits=None):
     return figure
 
 
-def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=None, n_min=5):
+def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group=None, n_min=5):
     metadata = database.get_metadata(which='all')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
                        'Group': metadata['Group'].values,
                        'Start': metadata['Start'].values,
                        'End': metadata['End'].values,
+                       'Event': metadata['Event'].values,
                        }).dropna(how='all')
     df = pd.concat((df, metadata[list_metadata]), axis=1)
 
@@ -175,8 +169,8 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=N
         group = df['Group'].unique()
         group = group[:2]
 
-    df['Event'] = ~np.isnat(df['End'])
     df['End'] = df['End'].fillna(datetime.datetime.now())
+    df['Event'] = df['Event'].fillna(0)
 
     df['Time'] = df['End']
     df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
@@ -184,7 +178,9 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=12, group=N
 
     df = df[~(df['Time'].isna())]
 
-    df['Time'].loc[df['Time'] > followup_time] = followup_time
+    if followup_time is None:
+        df.loc[df['Time'] > followup_time, 'Time'] = followup_time
+
     df = df.replace(group[0], 0).replace(group[1], 1)
 
     figure = Figure(1)
@@ -269,14 +265,14 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
         lesion = patients[p].get_lesion()
 
         if (not lesion.empty) & (not volume.empty):
-            idx = [True if x in lesion[lesion == True].index else False for x in list(volume['VOI'].values)]
+            idx = [True if x in lesion[lesion].index else False for x in list(volume['VOI'].values)]
             time, evolution = compute_evolution(volume[idx])
 
             g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
-            ax.plot(time, evolution.T, '-', color=colors[g], alpha=1 / (len(patients) ** .4))
+            ax.plot(time, evolution.values[0], '-', color=colors[g], alpha=1 / (len(patients) ** .4))
 
             evolution.insert(loc=0, column='Group', value=groups[g])
-            df = df.append(evolution)
+            df = pd.concat((df, evolution))
 
     if visits is None:
         visits = list(df.columns)
@@ -335,7 +331,8 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     return figure
 
 
-def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None, adjust_ipfs=False, groups=None):
+def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None, groups=None, metric='Volume',
+                      adjust_ipfs=False, visits=None):
     cutoff_date = (datetime.datetime.now() if cutoff_date is None
                    else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
 
@@ -355,29 +352,34 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     if followup_time is None:
         followup_time = df['Time'].max()
     else:
-        df['Time'].loc[df['Time'] > followup_time] = followup_time
+        df.loc[df['Time'] > followup_time, 'Time'] = followup_time
     # df = df.replace(groups[0], 0).replace(groups[1], 1)
 
     df['End'] = df['End'].fillna(cutoff_date)
-    df['Event'] = df['Event'].fillna(False)
+    df['Event'] = df['Event'].fillna(0)
 
     if event == 'PFS':
-        pass
-        # patients = database.get_patients()
-        # for p in range(len(patients)):
-        #     df = patients[p].get_data(['RECIST'], norm=True)['RECIST']
-        #     df['Study'] = df['Study'] - df['Study'][df['Session'] == 'Baseline'].values[0]
-        #     if 'PD' in list(df['mRECIST response'].values):
-        #         t = df['Study'][[i for i, x in enumerate(list(df['mRECIST response'].values)) if x == 'PD'][0]]
-        #         data.at[data[data['patient'] == patients[p].id].index[0], 'time'] = t.days / 30.5
-        #         data.at[data[data['patient'] == patients[p].id].index[0], 'event'] = True
-        #     elif (data['patient'] == patients[p].id).any() & adjust_ipfs:
-        #         tt = df['Session'].values[-1]
-        #         tt = (1.5 if (tt.find('W0') >= 0) | (tt.find(
-        #             'Baseline') >= 0) else 3 if tt == 'W6' else 6 if tt == 'M3' else 9 if tt == 'M6' else 12 if tt == 'M9' else inf)
-        #         if data.at[data[data['patient'] == patients[p].id].index[0], 'time'] > tt:
-        #             data.at[data[data['patient'] == patients[p].id].index[0], 'time'] = tt
-        #             data.at[data[data['patient'] == patients[p].id].index[0], 'event'] = False
+        patients = database.get_patients()
+
+        for patient in patients:
+            volume = patient.get_data(metric)
+            lesion = patient.get_lesion()
+
+            if (not lesion.empty) & (not volume.empty):
+                time, response = compute_revised_RECIST(volume, lesion)
+
+                if 'PD' in response.values:
+                    t = time[list(response.values[0]).index('PD')]
+                    if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
+                        df.loc[df['Patient'] == patient.id, 'Time'] = t
+                        df.loc[df['Patient'] == patient.id, 'Event'] = 1
+                if adjust_ipfs & (visits is not None):
+                    if False in [True if i in response.columns else False for i in visits[:(len(response.columns) - 1)]]:
+                        t = time[[True if i in response.columns else False
+                                  for i in visits[:(len(response.columns)-1)]].index(False) + 1]
+                        if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
+                            df.loc[df['Patient'] == patient.id, 'Time'] = t
+                            df.loc[df['Patient'] == patient.id, 'Event'] = 0
 
     results_all = logrank_test(df['Time'][df['Group'] == groups[0]],
                                df['Time'][df['Group'] == groups[1]],
@@ -385,6 +387,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
                                event_observed_B=df['Event'][df['Group'] == groups[1]])
 
     figure = Figure()
+    figure.set_figsize((0.8, 0.8))
     colors = figure.get_colors()
     ax = figure.get_axes()[0, 0]
 
@@ -422,8 +425,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
         ax.lines[i].set_alpha(0.5)
 
     ax.set_xlabel('Time (months)')
-    ax.set_ylabel(
-        'Intracranial progression-free survival probability' if event == 'iPFS' else 'Survival probability')
+    ax.set_ylabel('Progression-free survival probability' if event == 'PFS' else 'Survival probability')
     ax.set_xlim([0, followup_time])
     ax.set_ylim([0, 1.05])
     figure.figure.set_figheight(figure.figure.get_figwidth())
@@ -434,7 +436,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     return figure
 
 
-def response_rate_plot(database, visits=None, criteria=None, cutoff_date=None, metric='Volume', groups=None):
+def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=None, metric='Volume', groups=None):
     cutoff_date = (datetime.datetime.now() if cutoff_date is None
                    else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
 
@@ -450,12 +452,17 @@ def response_rate_plot(database, visits=None, criteria=None, cutoff_date=None, m
         lesion = patients[p].get_lesion()
 
         if (not lesion.empty) & (not volume.empty):
-            _, response = compute_mRECIST(volume, lesion)
+            if criteria == 'rRECIST':
+                _, response = compute_revised_RECIST(volume, lesion)
+            elif criteria == 'mRECIST':
+                _, response = compute_revised_RECIST(volume, patients[p].get_lesion(max_number=np.inf))
+            else:
+                _, response = compute_revised_RECIST(volume, lesion)
 
             g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
             response.insert(loc=0, column='Group', value=groups[g])
 
-            df = df.append(response)
+            df = pd.concat((df, response))
 
     if visits is None:
         visits = list(df.columns)
@@ -490,6 +497,4 @@ def response_rate_plot(database, visits=None, criteria=None, cutoff_date=None, m
     ax.set_ylabel('Number of responses (PR or CR)')
 
     figure.config()
-    # figure.save('test.png')
-    # figure.close()
     return figure
