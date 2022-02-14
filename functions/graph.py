@@ -1,19 +1,14 @@
+import datetime
+
+import numpy as np
+import pandas as pd
 from lifelines import CoxPHFitter, KaplanMeierFitter
 from lifelines.plotting import add_at_risk_counts
-from matplotlib import pyplot as plt
-from openpyxl import load_workbook
-from scipy.stats import stats
 from lifelines.statistics import logrank_test
+from matplotlib import pyplot as plt
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
-import os
-import datetime
-import numpy as np
-import pandas as pd
-
-from collections import Counter
-
 from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time
 
 
@@ -172,13 +167,12 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
 
-    df['Time'] = df['End']
-    df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
     df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
-    if followup_time is None:
+    if followup_time is not None:
         df.loc[df['Time'] > followup_time, 'Time'] = followup_time
 
     df = df.replace(group[0], 0).replace(group[1], 1)
@@ -374,9 +368,10 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
                         df.loc[df['Patient'] == patient.id, 'Time'] = t
                         df.loc[df['Patient'] == patient.id, 'Event'] = 1
                 if adjust_ipfs & (visits is not None):
-                    if False in [True if i in response.columns else False for i in visits[:(len(response.columns) - 1)]]:
+                    if False in [True if i in response.columns else False for i in
+                                 visits[:(len(response.columns) - 1)]]:
                         t = time[[True if i in response.columns else False
-                                  for i in visits[:(len(response.columns)-1)]].index(False) + 1]
+                                  for i in visits[:(len(response.columns) - 1)]].index(False) + 1]
                         if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
                             df.loc[df['Patient'] == patient.id, 'Time'] = t
                             df.loc[df['Patient'] == patient.id, 'Event'] = 0

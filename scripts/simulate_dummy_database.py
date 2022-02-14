@@ -53,7 +53,7 @@ def generate_dummy_data(metadata_file, data_folder=None, nb_param=1, visit_times
         os.makedirs(data_folder)
 
     metadata = pd.read_excel(metadata_file)
-    metadata['End']=metadata['End'].fillna(datetime.datetime.now())
+    metadata['End'] = metadata['End'].fillna(datetime.datetime.now())
 
     for pat in np.arange(len(metadata)):
         nb_lesions = 1 + abs(round(np.random.normal(dist_lesions[0], dist_lesions[1])))

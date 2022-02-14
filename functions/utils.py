@@ -1,5 +1,9 @@
+from math import floor, ceil, sqrt, erf
+
 import numpy as np
 import pandas as pd
+from lifelines import KaplanMeierFitter, CoxPHFitter
+from scipy import stats
 
 
 def visit_to_time(visits):
@@ -8,7 +12,7 @@ def visit_to_time(visits):
                 for f in visits]
     if type(visits) is str:
         f = visits
-        return (int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1))
+        return int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
 
 
 # def time_to_visit(times):
@@ -89,3 +93,137 @@ def compute_revised_RECIST(volume, lesion):
             evol_bl[ses] = 'SD'
 
     return time, evol_bl
+
+
+def sample_size_calculation(df, alpha=.05, power=.8, ratio=1, criteria='mST'):
+    # from: https://www.statsdirect.com/help/sample_size/survival.htm
+    # ref: Dupont WD. Power and sample size calculations. Controlled Clinical Trials 1990;11:116-128.
+
+    ctl = df['Group'] == 0
+    exp = df['Group'] == 1
+
+    if criteria == 'HR':
+        cph = CoxPHFitter()
+        cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+
+    kmf_ctl = KaplanMeierFitter(alpha=alpha)
+    kmf_ctl.fit(df['Time'][ctl], df['Event'][ctl])
+
+    kmf_exp = KaplanMeierFitter(alpha=alpha)
+    kmf_exp.fit(df['Time'][exp], df['Event'][exp])
+
+    # POWER: probability of detecting a real effect.
+    # ALPHA: probability of detecting a false effect (two sided: double this if you need one sided).
+    # A: accrual time during which subjects are recruited to the study.
+    # F: additional follow-up time after the end of recruitment.
+    # *: input either (C and r) or (C and E), where r=E/C.
+    # C: median survival time for control group.
+    # E: median survival time for experimental group.
+    # r: hazard ratio or ratio of median survival times.
+    # M: number of controls per experimental subject.
+
+    A = 12 * 3
+    F = 12
+    C = kmf_ctl.median_survival_time_
+    E = kmf_exp.median_survival_time_
+    if criteria == 'HR':
+        r = cph.hazard_ratios_.values[0]
+    else:
+        r = E / C  # cph.hazard_ratios_.values[0]
+    M = ratio
+
+    z_a = stats.norm.ppf(1 - alpha / 2)
+    z_b = stats.norm.ppf(power)
+
+    m = (C + E) / 2
+    p_a = 1 - np.exp(-np.log(2) * A / m) / (np.log(2) * A / m)
+    p = 1 - p_a * np.exp(-np.log(2) * F / m)
+    n = (z_a + z_b) ** 2 * (((1 + 1 / m) / p) / (np.log(r) ** 2))
+
+    return ceil(n)
+
+
+def predictive_probability(df, n_final, alpha=.05):
+    # from: https://www.statsdirect.com/help/sample_size/survival.htm
+    # ref: Dupont WD. Power and sample size calculations. Controlled Clinical Trials 1990;11:116-128.
+
+    followup_time = df['Time'].max()
+
+    ctl = df['Group'] == 0
+    exp = df['Group'] == 1
+
+    kmf_ctl = KaplanMeierFitter(alpha=alpha)
+    kmf_ctl.fit(df['Time'][ctl], df['Event'][ctl])
+
+    kmf_exp = KaplanMeierFitter(alpha=alpha)
+    kmf_exp.fit(df['Time'][exp], df['Event'][exp])
+
+    cph = CoxPHFitter()
+    cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+    # cph.print_summary()
+
+    # Extract parameters
+    n = len(df)
+    events = df['Event'].sum()
+    p_ctl = 1 - kmf_ctl.predict(followup_time)
+    p_exp = 1 - kmf_exp.predict(followup_time)
+
+    se = cph.standard_errors_
+    lnHR = cph.params_[0]
+
+    def phi(x, m, sd):
+        return (1.0 + erf((x - m) / (sd * sqrt(2.0)))) / 2.0
+
+    def phi_HR(n_n=0, x=0):
+        n_events = round(n_n * (p_ctl + p_exp) / 2)
+        if n_events > 0:
+            sd = se * sqrt(events) * sqrt((1 / events) + (1 / n_events))
+        else:
+            sd = se
+
+        # Cumulative distribution function for the standard normal distribution
+        return phi(x, lnHR, sd)
+
+    return phi_HR(n_final - n, x=0)
+
+
+def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1):
+    # from: https://arxiv.org/pdf/2102.13550.pdf
+
+    followup_time = df['Time'].max()
+
+    ctl = df['Group'] == 0
+    exp = df['Group'] == 1
+
+    kmf_ctl = KaplanMeierFitter(alpha=alpha)
+    kmf_ctl.fit(df['Time'][ctl], df['Event'][ctl])
+
+    kmf_exp = KaplanMeierFitter(alpha=alpha)
+    kmf_exp.fit(df['Time'][exp], df['Event'][exp])
+
+    cph = CoxPHFitter()
+    cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+    # cph.print_summary()
+
+    # Extract parameters
+    n = len(df)
+    d = df['Event'].sum()
+    p_ctl = 1 - kmf_ctl.predict(followup_time)
+    p_exp = 1 - kmf_exp.predict(followup_time)
+    D = round((n_final - n) * (p_ctl + p_exp) / 2) + d
+
+    delta_d = cph.hazard_ratios_[0]
+
+    r = sqrt((ratio + 1) ** 2 / ratio)
+    y = stats.norm.cdf(1 - alpha)
+
+    sigma_0 = (2 / sqrt(d)) ** 2
+    Delta_0 = cph.hazard_ratios_[0]
+    Delta_1 = 1
+
+    if condition == 'CP':
+        return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(D / (D - d)))
+    elif condition == 'PPoS':
+        return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(d / (D - d)))
+    else:
+        return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / (sqrt(D * sigma_0 ** 2 + r ** 2)))
