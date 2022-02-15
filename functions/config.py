@@ -37,7 +37,7 @@ class Config:
     def get_value(self, key, section=None):
         if section is not None:
             val = self.config[section][key]
-            return ast.literal_eval(val) if (val.startswith('[') & val.startswith(']')) else val
+            return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
         else:
             for section in self.config.sections():
                 if key in self.config[section]:
@@ -65,7 +65,8 @@ class Config:
 
     def extract_config_values(self, key):
         if key == 'list_metadata':
-            metadata = pd.read_excel(self.get_value('metadata', section='PATH'))
+            metadata = pd.read_excel(
+                os.path.join(self.get_value('database', section='PATH'), self.get_value('metadata', section='PATH')))
 
             val = list(metadata.columns)
             val.remove('Patient')
@@ -74,12 +75,14 @@ class Config:
             self.set_value(val, key='list_metadata', section='METADATA')
 
         if key == 'followup':
-            metadata = pd.read_excel(self.get_value('metadata', section='PATH'))
-
-            val = list(metadata.columns)
-            val.remove('Patient')
-            val.remove('Group')
-
-            self.set_value(val, key='list_metadata', section='METADATA')
+            # TODO: correct next code
+            # metadata = pd.read_excel(self.get_value('followup', section='OTHER'))
+            #
+            # val = list(metadata.columns)
+            # val.remove('Patient')
+            # val.remove('Group')
+            #
+            # self.set_value(val, key='followup', section='OTHER')
+            pass
 
         return val

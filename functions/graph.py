@@ -27,8 +27,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
 
-    df['Time'] = df['End'].copy()
-    df['Time'] = (df['Time'] - df['Start']).dt.total_seconds() / 3600 / 24
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
     df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
@@ -86,9 +85,10 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     patients = database.get_patients(patient_ids)
     for p in range(len(r1)):
         volume = patients[p].get_data(metric)
-        lesion = patients[p].get_lesion()
+        lesion = patients[p].get_lesion(metric)
 
-        flwt = followup_visits.copy()
+        if followup_visits is not None:
+            flwt = followup_visits.copy()
         if (not lesion.empty) & (not volume.empty):
             _, response = compute_revised_RECIST(volume, lesion)
 
@@ -96,7 +96,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
             for s in response.columns[1:]:
                 resp = response[s].values[0]
                 t = visit_to_time(s) / (365 / 12)
-                if flwt is not None:
+                if followup_visits is not None:
                     if s in flwt:
                         flwt.remove(s)
 
@@ -144,7 +144,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     figure.config()
     ax.grid(True, which='major', axis='x', linestyle='--')
     ax.grid(False, axis='y')
-    ax.legend(loc='center left', bbox_to_anchor=(1, 0.7))
+    # ax.legend(loc='center left', bbox_to_anchor=(1, 0.7))
 
     return figure
 
@@ -230,6 +230,8 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
     x_max = round(min([0.95, (min(lower) * 0.95 if min(lower) > 0 else min(lower) * 1.05)]), 2)
     ax = p.plot(figsize=(7, 3), t_adjuster=0.09, max_value=x_min, min_value=x_max)
 
+    ax.text(s="Group {} vs. group {}".format(group[0], group[1]), x=0, y=1.1 * ax.get_ylim()[1],
+            horizontalalignment='center')
     plt.suptitle("Subgroup", x=-0.1, y=0.98)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -244,7 +246,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     metadata = metadata[['Patient', 'Group']]
 
     if groups is None:
-        groups = sorted(list(metadata['Group'].unique()))
+        groups = sorted(list(metadata['Group'].dropna().unique()))
 
     figure = Figure(1)
     figure.set_figsize((1.3, 1))
@@ -256,7 +258,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     patients = database.get_patients()
     for p in range(len(patients)):
         volume = patients[p].get_data(metric)
-        lesion = patients[p].get_lesion()
+        lesion = patients[p].get_lesion(metric)
 
         if (not lesion.empty) & (not volume.empty):
             idx = [True if x in lesion[lesion].index else False for x in list(volume['VOI'].values)]
@@ -272,15 +274,13 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
         visits = list(df.columns)
         visits.remove('Group')
     else:
-        df = df[['Group'] + [i for i in df.columns if i in df.columns]]
+        df = df[['Group'] + [i for i in df.columns if i in visits]]
 
     # TODO
     # stats.mannwhitneyu()
 
     for g in range(len(groups)):
-        x = np.array(
-            [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f in
-             visits]) / (365 / 12)
+        x = np.array(visit_to_time(visits)) / (365 / 12)
 
         if stat == 'mean':
             y = df[df['Group'] == groups[g]][visits].mean().values
@@ -334,7 +334,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
 
     if groups is None:
-        groups = sorted(list(df['Group'].unique()))
+        groups = sorted(list(df['Group'].dropna().unique()))
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
 
@@ -357,7 +357,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
 
         for patient in patients:
             volume = patient.get_data(metric)
-            lesion = patient.get_lesion()
+            lesion = patient.get_lesion(metric)
 
             if (not lesion.empty) & (not volume.empty):
                 time, response = compute_revised_RECIST(volume, lesion)
@@ -438,19 +438,19 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
     metadata = database.get_metadata(which='all')
 
     if groups is None:
-        groups = sorted(list(metadata['Group'].unique()))
+        groups = sorted(list(metadata['Group'].dropna().unique()))
 
     df = pd.DataFrame([])
     patients = database.get_patients()
     for p in range(len(patients)):
         volume = patients[p].get_data(metric)
-        lesion = patients[p].get_lesion()
+        lesion = patients[p].get_lesion(metric)
 
         if (not lesion.empty) & (not volume.empty):
             if criteria == 'rRECIST':
                 _, response = compute_revised_RECIST(volume, lesion)
             elif criteria == 'mRECIST':
-                _, response = compute_revised_RECIST(volume, patients[p].get_lesion(max_number=np.inf))
+                _, response = compute_revised_RECIST(volume, patients[p].get_lesion(metric, max_number=np.inf))
             else:
                 _, response = compute_revised_RECIST(volume, lesion)
 
@@ -463,25 +463,29 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
         visits = list(df.columns)
         visits.remove('Group')
     else:
-        df = df[['Group'] + [i for i in df.columns if i in df.columns]]
+        df = df[['Group'] + [i for i in df.columns if i in visits]]
 
     figure = Figure(1)
     figure.set_figsize((1.3, 1))
     ax = figure.get_axes()[0, 0]
     colors = figure.get_colors()
 
-    labels = list(df.columns)[2:]
+    labels = list(df.columns)[1:]
     width = .8
     x = np.arange(len(labels))
 
     for g in range(len(groups)):
-        ax.bar(x - width / 2 + g * width / len(groups),
-               ((df[labels][df['Group'] == groups[g]] == 'PR') | (
-                       df[labels][df['Group'] == groups[g]] == 'CR')).sum().values,
+        pr = (df[labels][df['Group'] == groups[g]] == 'PR').sum().values
+        cr = (df[labels][df['Group'] == groups[g]] == 'CR').sum().values
+        n = (~((df[labels][df['Group'] == groups[g]]).isna())).sum().values
+
+        ax.bar(x - width / 2 + (g + .5) * width / len(groups), 100 * (pr + cr) / n,
                width / len(groups), color=colors[g], label='Group: ' + groups[g])
-        ax.bar(x - width / 2 + g * width / len(groups),
-               (df[labels][df['Group'] == groups[g]] == 'CR').sum().values,
+        ax.bar(x - width / 2 + (g + .5) * width / len(groups), 100 * cr / n,
                width / len(groups), color=colors[g], edgecolor='black', hatch='//')
+
+        for i in np.arange(len(x)):
+            ax.text(x[i] - width / 2 + (g + .5) * width / len(groups), 100 * (pr[i] + cr[i]) / n[i] + 2, str(n[i]))
 
     ax.bar(np.nan, np.nan, width, color='white', edgecolor='black', hatch='//', label='CR')
 
@@ -489,7 +493,9 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
     ax.set_xticklabels(labels)
 
     ax.set_xlabel('Sessions')
-    ax.set_ylabel('Number of responses (PR or CR)')
+    ax.set_ylabel('Percentage of responses (PR or CR)')
+
+    ax.set_ylim([0, ax.get_ylim()[1] + 5])
 
     figure.config()
     return figure

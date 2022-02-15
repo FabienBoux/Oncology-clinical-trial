@@ -1,4 +1,4 @@
-from math import floor, ceil, sqrt, erf
+from math import ceil, sqrt, erf
 
 import numpy as np
 import pandas as pd
@@ -6,13 +6,28 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from scipy import stats
 
 
+def to_float(x):
+    try:
+        float(x)
+        return True
+    except ValueError:
+        return False
+
+
 def visit_to_time(visits):
     if type(visits) is list:
-        return [int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
-                for f in visits]
+        visits = ['D0' if f.lower() == 'baseline' else f.upper() for f in visits]
+    elif type(visits) is str:
+        if visits.lower() == 'baseline':
+            visits = 'D0'
+
+    if type(visits) is list:
+        return [(int(float(f[1:])) if to_float(f[1:]) else np.nan) * (
+            7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1) for f in visits]
     if type(visits) is str:
         f = visits
-        return int(f[1:]) * (7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
+        return (int(float(f[1:])) if to_float(f[1:]) else np.nan) * (
+            7 if f[0] == 'W' else (365 / 12) if f[0] == 'M' else 365 if f[0] == 'Y' else 1)
 
 
 # def time_to_visit(times):
@@ -31,8 +46,10 @@ def compute_sum(volume):
     volume.groupby(['Time', 'Value'])
 
     sessions = volume['Session'].unique()
-    baseline = list(set([x if x.lower() == 'baseline' else x if float(x[1:]) == 0 else None for x in sessions]))
-    baseline.remove(None)
+    baseline = list(set([x if x.lower() == 'baseline' else x if (float(x[1:]) if to_float(x[1:])
+                                                                 else 1) == 0 else None for x in sessions]))
+    if None in baseline:
+        baseline.remove(None)
 
     time = []
     sum = pd.DataFrame([])
@@ -47,8 +64,10 @@ def compute_evolution(volume, reference='baseline'):
     volume.groupby(['Time', 'Value'])
 
     sessions = volume['Session'].unique()
-    baseline = list(set([x if x.lower() == 'baseline' else x if float(x[1:]) == 0 else None for x in sessions]))
-    baseline.remove(None)
+    baseline = list(set([x if x.lower() == 'baseline' else x if (float(x[1:]) if to_float(x[1:])
+                                                                 else 1) == 0 else None for x in sessions]))
+    if None in baseline:
+        baseline.remove(None)
 
     time = []
     evolution = pd.DataFrame([])
@@ -64,8 +83,11 @@ def compute_evolution(volume, reference='baseline'):
         for ses in sessions:
             ref.append(volume[volume['Session'] == ses]['Value'].sum())
             time.append(volume[volume['Session'] == ses]['Time'].mean() / (365 / 12))
-            evolution.loc[0, ses] = 100 * (
-                    volume[volume['Session'] == ses]['Value'].sum() - np.array(ref).min()) / np.array(ref).min()
+            if np.array(ref).min() == 0:
+                evolution.loc[0, ses] = np.inf
+            else:
+                evolution.loc[0, ses] = 100 * (
+                        volume[volume['Session'] == ses]['Value'].sum() - np.array(ref).min()) / np.array(ref).min()
 
     return time, evolution
 
