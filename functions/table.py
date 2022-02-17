@@ -79,6 +79,7 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
     if group is None:
         group = df['Group'].unique()
         group = group[:2]
+        group = np.array([group[1], group[0]])
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
@@ -93,7 +94,7 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
 
         for patient in patients:
             volume = patient.get_data(metric)
-            lesion = patient.get_lesion()
+            lesion = patient.get_lesion(metric)
 
             if (not lesion.empty) & (not volume.empty):
                 time, response = compute_revised_RECIST(volume, lesion)

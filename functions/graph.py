@@ -12,7 +12,7 @@ from clinlib.displaying import Figure
 from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time
 
 
-def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume'):
+def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume', groups=None):
     metadata = database.get_metadata(which='all')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
@@ -31,6 +31,9 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
+
+    if groups is None:
+        groups = sorted(list(df['Group'].dropna().unique()))
 
     if followup_time is None:
         followup_time = df['Time'].max()
@@ -70,11 +73,11 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
 
     censored = df['Event'][v].isna()
 
-    for g in range(len(df['Group'].unique())):
-        v_group = np.array([True if df['Group'][p] == df['Group'].unique()[g] else False for p in df[v].index])
+    for g in range(len(groups)):
+        v_group = np.array([True if df['Group'][p] == groups[g] else False for p in df[v].index])
 
         ax.barh(r2[v_group], y2[v_group], height=barWidth, color=colors[g], alpha=0.65,
-                label='Group: {}'.format(df['Group'].unique()[g]))
+                label='Group: {}'.format(groups[g]))
         ax.plot(y2[v_group & censored], r2[v_group & censored], "_", color='black')
         ax.plot(y2[v_group & censored] + followup_time * .01, r2[v_group & censored], ">", color='black')
 
@@ -149,7 +152,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     return figure
 
 
-def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group=None, n_min=5):
+def forest_plot(database, list_metadata, model='lnHR', followup_time=None, groups=None, n_min=5):
     metadata = database.get_metadata(which='all')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
@@ -160,9 +163,9 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
                        }).dropna(how='all')
     df = pd.concat((df, metadata[list_metadata]), axis=1)
 
-    if group is None:
-        group = df['Group'].unique()
-        group = group[:2]
+    if groups is None:
+        groups = sorted(list(df['Group'].dropna().unique()))
+        groups = groups[:2]
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
@@ -175,7 +178,7 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
     if followup_time is not None:
         df.loc[df['Time'] > followup_time, 'Time'] = followup_time
 
-    df = df.replace(group[0], 0).replace(group[1], 1)
+    df = df.replace(groups[0], 0).replace(groups[1], 1)
 
     figure = Figure(1)
     colors = figure.get_colors()
@@ -228,17 +231,17 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
 
     x_min = round(max([1.05, (max(upper) * 1.05 if max(upper) > 0 else max(upper) * 0.95)]), 2)
     x_max = round(min([0.95, (min(lower) * 0.95 if min(lower) > 0 else min(lower) * 1.05)]), 2)
-    ax = p.plot(figsize=(7, 3), t_adjuster=0.09, max_value=x_min, min_value=x_max)
+    ax = p.plot(figsize=(8, 4), t_adjuster=0.05, max_value=x_min, min_value=x_max)
 
-    ax.text(s="Group {} vs. group {}".format(group[0], group[1]), x=0, y=1.1 * ax.get_ylim()[1],
-            horizontalalignment='center')
+    ax.text(s=u"\u2190 favour {} -".format(groups[1]), x=0, y=1.1 * ax.get_ylim()[1], horizontalalignment='right')
+    ax.text(s=u"- favour {} \u2192".format(groups[0]), x=0, y=1.1 * ax.get_ylim()[1], horizontalalignment='left')
     plt.suptitle("Subgroup", x=-0.1, y=0.98)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['bottom'].set_visible(True)
     ax.spines['left'].set_visible(False)
 
-    return 1
+    return plt.gcf()
 
 
 def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume', groups=None):
@@ -426,6 +429,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     figure.figure.set_figheight(figure.figure.get_figwidth())
 
     add_at_risk_counts(kmf_model[groups[0]], kmf_model[groups[1]], ax=ax)
+    plt.tight_layout()
 
     figure.config()
     return figure

@@ -19,8 +19,10 @@ group_labels = group.unique()
 list_selected = ['Age', 'Cancer type', 'ECOG PS', 'Gender', 'Number of metastases',
                  'Presence of extracranial metastases at inclusion']
 
-# fig = swimmer_plot(database, followup_time=12, followup_visits=['W6', 'M3', 'M6', 'M9', 'M12'], metric='Diameter')
-fig = response_rate_plot(database, visits=['W6', 'M3', 'M6'], criteria='mRECIST', metric='Diameter')
+
+fig = forest_plot(database, list_selected, model='lnHR', followup_time=None, groups=['WBRT','AGuIX'], n_min=5)
+# fig = swimmer_plot(database, followup_time=12, followup_visits=['W6', 'M3', 'M6', 'M9', 'M12'], metric='Diameter', groups =['WBRT','AGuIX'])
+# fig = response_rate_plot(database, visits=['W6', 'M3', 'M6'], criteria='mRECIST', metric='Diameter')
 # fig = volumetry_plot(database, visits=['W6', 'M3', 'M6', 'M9', 'M12'], stat='mean', metric='Diameter')
 
 # fig = kaplan_meier_plot(database, followup_time=12, event='OS', adjust_ipfs=True, metric="Diameter",
