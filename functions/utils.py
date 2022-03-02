@@ -209,7 +209,7 @@ def predictive_probability(df, n_final, alpha=.05):
     return phi_HR(n_final - n, x=0)
 
 
-def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1):
+def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1, success='trial', Dmin=0.8):
     # from: https://arxiv.org/pdf/2102.13550.pdf
 
     followup_time = df['Time'].max()
@@ -235,17 +235,22 @@ def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1):
     D = round((n_final - n) * (p_ctl + p_exp) / 2) + d
 
     delta_d = cph.hazard_ratios_[0]
+    Delta_1 = 1
 
     r = sqrt((ratio + 1) ** 2 / ratio)
-    y = stats.norm.cdf(1 - alpha)
+    if success == 'trial':
+        # for details, see: https://eclass.uoa.gr/modules/document/file.php/MATH301/PracticalSession3/LanDeMets.pdf
+        y = stats.norm.ppf(1 - alpha, loc=0, scale=1)
+    elif success == 'clinical':
+        k = 2 / sqrt(d)  # equivalent to cph.standard_errors_
+        y = - np.log(Dmin) / k
 
-    sigma_0 = (2 / sqrt(d)) ** 2
-    Delta_0 = cph.hazard_ratios_[0]
-    Delta_1 = 1
+    Delta_0 = delta_d
+    sigma_0 = 2 / sqrt(d)
 
     if condition == 'CP':
         return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(D / (D - d)))
     elif condition == 'PPoS':
         return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(d / (D - d)))
     else:
-        return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / (sqrt(D * sigma_0 ** 2 + r ** 2)))
+        return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / sqrt(D * sigma_0 ** 2 + r ** 2))

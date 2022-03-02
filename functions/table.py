@@ -8,7 +8,7 @@ from functions.utils import sample_size_calculation, predictive_probability, com
 
 def sample_size_table(database, followup_time=None, group=None, criteria='HR', event='OS', metric='Volume', visits=None,
                       adjust_ipfs=True):
-    metadata = database.get_metadata(which='all')
+    metadata = database.get_metadata(which='in')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
                        'Group': metadata['Group'].values,
@@ -34,7 +34,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
 
         for patient in patients:
             volume = patient.get_data(metric)
-            lesion = patient.get_lesion()
+            lesion = patient.get_lesion(metric)
 
             if (not lesion.empty) & (not volume.empty):
                 time, response = compute_revised_RECIST(volume, lesion)
@@ -44,6 +44,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
                     if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
                         df.loc[df['Patient'] == patient.id, 'Time'] = t
                         df.loc[df['Patient'] == patient.id, 'Event'] = 1
+
                 if adjust_ipfs & (visits is not None):
                     if False in [True if i in response.columns else False for i in
                                  visits[:(len(response.columns) - 1)]]:
@@ -54,6 +55,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
                             df.loc[df['Patient'] == patient.id, 'Event'] = 0
 
     if followup_time is not None:
+        df.loc[df['Time'] > followup_time, 'Event'] = 0
         df.loc[df['Time'] > followup_time, 'Time'] = followup_time
 
     df = df.replace(group[0], 0).replace(group[1], 1)
@@ -67,7 +69,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
 
 def probability_of_success(database, n_total, followup_time=None, group=None, event='OS', metric='Volume', visits=None,
                            adjust_ipfs=True):
-    metadata = database.get_metadata(which='all')
+    metadata = database.get_metadata(which='in')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
                        'Group': metadata['Group'].values,
@@ -104,6 +106,7 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
                     if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
                         df.loc[df['Patient'] == patient.id, 'Time'] = t
                         df.loc[df['Patient'] == patient.id, 'Event'] = 1
+
                 if adjust_ipfs & (visits is not None):
                     if False in [True if i in response.columns else False for i in
                                  visits[:(len(response.columns) - 1)]]:
@@ -119,11 +122,11 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
 
     df = df.replace(group[0], 0).replace(group[1], 1)
 
-    dat = [round(power_probability(df, n_total, condition='CP') * 100, 1),
-           round(power_probability(df, n_total, condition='PoS') * 100, 1),
+    dat = [round(power_probability(df, n_total, condition='PoS') * 100, 1),
+           round(power_probability(df, n_total, condition='CP') * 100, 1),
            round(power_probability(df, n_total, condition='PPoS') * 100, 1)]
 
-    dat.append("{}-{}".format(round(np.array(dat).min()), round(np.array(dat).max())))
+    dat.append("{}-{}".format(round(np.array(dat).min()), round(np.array(dat[1:]).max())))
 
     # return predictive_probability(df, n_total)
-    return pd.DataFrame(data=dat, columns=['Probabilities (%)'], index=['CP', 'PoS', 'PPoS', 'Overall'])
+    return pd.DataFrame(data=dat, columns=['Probabilities (%)'], index=['PoS', 'CP', 'PPoS', 'Overall'])
