@@ -2,14 +2,16 @@ import datetime
 
 import numpy as np
 import pandas as pd
-from lifelines import CoxPHFitter, KaplanMeierFitter
+
+from lifelines import CoxPHFitter, KaplanMeierFitter, WeibullFitter, WeibullAFTFitter
 from lifelines.plotting import add_at_risk_counts
-from lifelines.statistics import logrank_test
+from lifelines.statistics import logrank_test, proportional_hazard_test
 from matplotlib import pyplot as plt
+from zepid import RiskRatio
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
-from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time
+from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time, power_probability
 
 
 def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume', groups=None):
@@ -152,7 +154,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     return figure
 
 
-def forest_plot(database, list_metadata, model='lnHR', followup_time=None, groups=None, n_min=5):
+def forest_plot(database, list_metadata, model='HR', followup_time=None, groups=None, n_min=5):
     metadata = database.get_metadata(which='all')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
@@ -174,6 +176,7 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
     df['Time'] = df['Time'] / (365 / 12)
 
     df = df[~(df['Time'].isna())]
+    df = df[df['Time'] > 0]
 
     if followup_time is not None:
         df.loc[df['Time'] > followup_time, 'Time'] = followup_time
@@ -198,43 +201,80 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
             v = df[list_metadata[i]] == j
 
             if ((df[v]['Group'] == 0).sum() > n_min) & ((df[v]['Group'] == 1).sum() > n_min):
-                cph = CoxPHFitter()
-                cph.fit(df[['Group', 'Time', 'Event']][v], duration_col='Time', event_col='Event')
-
-                measure.append(round(cph.params_[0], 2))
-                lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
-                upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
-
                 n_rt.append((df[v]['Group'] == 0).sum())
                 n_ax.append((df[v]['Group'] == 1).sum())
+
+                if model == 'HR':
+                    cph = CoxPHFitter()
+                    cph.fit(df[['Group', 'Time', 'Event']][v], duration_col='Time', event_col='Event')
+
+                    measure.append(round(cph.params_[0], 2))
+                    lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
+                    upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
+
+                if model == 'RR':
+                    rr = RiskRatio()
+                    rr.fit(df[['Group', 'Event']][v], exposure='Group', outcome='Event')
+
+                    measure.append(round(rr.results.RiskRatio[1], 2))
+                    lower.append(round(rr.results.RR_LCL[1], 2))
+                    upper.append(round(rr.results.RR_UCL[1], 2))
+
+                if model == 'TR':
+                    weibull_aft = WeibullAFTFitter()
+                    weibull_aft.fit(df[['Group', 'Time', 'Event']][v], duration_col='Time', event_col='Event')
+
+                    measure.append(round(weibull_aft.params_[0], 2))
+                    lower.append(round(weibull_aft.confidence_intervals_.values[0, 0], 2))
+                    upper.append(round(weibull_aft.confidence_intervals_.values[0, 1], 2))
+
                 labs.append("{}: {}   (n={}/{})".format(list_metadata[i], str(j), (df[v]['Group'] == 0).sum(),
                                                         (df[v]['Group'] == 1).sum()))
+    if model == 'HR':
+        cph = CoxPHFitter()
+        cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
 
-    cph = CoxPHFitter()
-    cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+        measure.append(round(cph.params_[0], 2))
+        lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
+        upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
 
-    measure.append(round(cph.params_[0], 2))
-    lower.append(round(cph.confidence_intervals_.values[0, 0], 2))
-    upper.append(round(cph.confidence_intervals_.values[0, 1], 2))
+    if model == 'RR':
+        rr = RiskRatio()
+        rr.fit(df[['Group', 'Event']], exposure='Group', outcome='Event')
+
+        measure.append(round(rr.results.RiskRatio[1], 2))
+        lower.append(round(rr.results.RR_LCL[1], 2))
+        upper.append(round(rr.results.RR_UCL[1], 2))
+
+    if model == 'TR':
+        weibull_aft = WeibullAFTFitter()
+        weibull_aft.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+
+        measure.append(round(weibull_aft.params_[0], 2))
+        lower.append(round(weibull_aft.confidence_intervals_.values[0, 0], 2))
+        upper.append(round(weibull_aft.confidence_intervals_.values[0, 1], 2))
+
     labs.append("Overall (n={}/{})".format((df['Group'] == 0).sum(), (df['Group'] == 1).sum()))
     n_rt.append((df['Group'] == 0).sum())
     n_ax.append((df['Group'] == 1).sum())
 
-    if model == 'HR':
-        measure = np.exp(measure)
-        lower = np.exp(lower)
-        upper = np.exp(upper)
-
+    center = (1 if model == 'RR' else 0)
     p = EffectMeasurePlot(label=labs, effect_measure=measure, lcl=lower, ucl=upper)
-    p.labels(effectmeasure=model, center=(0 if model == "lnHR" else 1))
+    p.labels(effectmeasure=('log HR' if model == 'HR' else 'log TR' if model == 'TR' else 'RR'), center=center)
     p.colors(pointshape="D", pointcolor=colors[0], errorbarcolor=colors[0])
 
     x_min = round(max([1.05, (max(upper) * 1.05 if max(upper) > 0 else max(upper) * 0.95)]), 2)
     x_max = round(min([0.95, (min(lower) * 0.95 if min(lower) > 0 else min(lower) * 1.05)]), 2)
     ax = p.plot(figsize=(8, 4), t_adjuster=0.05, max_value=x_min, min_value=x_max)
 
-    ax.text(s=u"\u2190 favour {} -".format(groups[1]), x=0, y=1.1 * ax.get_ylim()[1], horizontalalignment='right')
-    ax.text(s=u"- favour {} \u2192".format(groups[0]), x=0, y=1.1 * ax.get_ylim()[1], horizontalalignment='left')
+    if model == 'TR':
+        ax.set_xlim(ax.get_xlim()[::-1])
+
+    ax.text(s=u"\u2190 favour {} -".format(groups[1]), x=center, y=1.1 * ax.get_ylim()[1],
+            horizontalalignment='right')
+    ax.text(s=u"- favour {} \u2192".format(groups[0]), x=center, y=1.1 * ax.get_ylim()[1],
+            horizontalalignment='left')
+
     plt.suptitle("Subgroup", x=-0.1, y=0.98)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -244,7 +284,7 @@ def forest_plot(database, list_metadata, model='lnHR', followup_time=None, group
     return plt.gcf()
 
 
-def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume', groups=None):
+def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='Volume', groups=None, trendlines=True):
     metadata = database.get_metadata()
     metadata = metadata[['Patient', 'Group']]
 
@@ -268,7 +308,8 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
             time, evolution = compute_evolution(volume[idx])
 
             g = groups.index(metadata[metadata['Patient'] == patients[p].id]['Group'].values[0])
-            ax.plot(time, evolution.values[0], '-', color=colors[g], alpha=1 / (len(patients) ** .4))
+            if not trendlines:
+                ax.plot(time, evolution.values[0], '-', color=colors[g], alpha=1 / (len(patients) ** .4))
 
             evolution.insert(loc=0, column='Group', value=groups[g])
             df = pd.concat((df, evolution))
@@ -289,8 +330,12 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
             y = df[df['Group'] == groups[g]][visits].mean().values
             err = df[df['Group'] == groups[g]][visits].std().values
 
-            ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Mean group {}".format(groups[g]))
-            ax.errorbar(x, y, err, fmt='none', color=colors[g], elinewidth=2, capsize=10, capthick=2)
+            if trendlines:
+                ax.plot(x, y, color=colors[g], linewidth=2, label="Mean group {}".format(groups[g]))
+                plt.fill_between(x, y - err, y + err, color=colors[g], alpha=0.25)
+            else:
+                ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Mean group {}".format(groups[g]))
+                ax.errorbar(x, y, err, fmt='none', color=colors[g], elinewidth=2, capsize=10, capthick=2)
 
             if g == 1:
                 ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
@@ -298,12 +343,17 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
 
         else:
             y = df[df['Group'] == groups[g]][visits].median().values
-            err_low = y - df[df['Group'] == groups[g]][visits].quantile(.2).values
-            err_high = df[df['Group'] == groups[g]][visits].quantile(.8).values - y
+            err_low = df[df['Group'] == groups[g]][visits].quantile(.2).values
+            err_high = df[df['Group'] == groups[g]][visits].quantile(.8).values
 
-            ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Median group {}".format(groups[g]))
-            ax.errorbar(x, y, np.vstack([err_low, err_high]), fmt='none', color=colors[g], elinewidth=2, capsize=10,
-                        capthick=2)
+            if trendlines:
+                ax.plot(x, y, color=colors[g], linewidth=2, label="Median group {}".format(groups[g]))
+                plt.fill_between(x, err_low, err_high, color=colors[g], alpha=0.25)
+            else:
+                ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Median group {}".format(groups[g]))
+                ax.errorbar(x, y, np.vstack([y - err_low, err_high - y]), fmt='none', color=colors[g], elinewidth=2,
+                            capsize=10,
+                            capthick=2)
             if g == 1:
                 ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
                             label="20-80 quantiles")
@@ -320,9 +370,9 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     ax.set_xticks(x)
     ax.set_xticklabels(visits)
 
-    plt.xlabel('Times (months)')
-    plt.ylabel('Changes in sum of the size of lesions\ncompared to baseline (%)')
-    plt.xlim([0, max(x) + 0.05])
+    ax.set_xlabel('Times (months)')
+    ax.set_ylabel('Changes in sum of the size of lesions\ncompared to baseline (%)')
+    ax.set_xlim([0, max(x) + 0.05])
 
     figure.config()
     return figure
@@ -413,8 +463,20 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
     #         label='Log-rank test: p={:.2f} (n={})\nwith censored: p={:.2f} (n={})'.format(results.p_value, v.sum(),
     #                                                                                       results_all.p_value,
     #                                                                                       len(rt)))
-    ax.plot(np.nan, np.nan, '-', color='k',
-            label='Log-rank test: p={:.2f} (n={})'.format(results_all.p_value, len(v)))
+
+    df = df[['Group', 'Time', 'Event']].replace('AGuIX', 1).replace('WBRT', 0)
+    cph = CoxPHFitter()
+    cph.fit(df[['Group', 'Time', 'Event']], duration_col='Time', event_col='Event')
+
+    if proportional_hazard_test(fitted_cox_model=cph, training_df=df[['Group', 'Time', 'Event']],
+                                time_transform='log').p_value[0] > 0.05:
+        ax.plot(np.nan, np.nan, '-', color='k',
+                label='Log-rank test: p={:.2f} (n={})'.format(results_all.p_value, len(v)))
+    else:
+        ax.plot(np.nan, np.nan, '-', color='k',
+                label=' Schoenfeld residual test: p={:.2f} (n={})'.format(
+                    proportional_hazard_test(fitted_cox_model=cph, training_df=df[['Group', 'Time', 'Event']],
+                                             time_transform='log').p_value[0], len(v)))
 
     for i in np.arange(0, 3 * len(groups), 3):
         ax.lines[i].set_marker('.')
@@ -500,6 +562,94 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
     ax.set_ylabel('Percentage of responses (PR or CR)')
 
     ax.set_ylim([0, ax.get_ylim()[1] + 5])
+
+    figure.config()
+    return figure
+
+
+def probability_of_success_plot(database, n_total, followup_time=None, group=None, event='OS', metric='Volume',
+                                visits=None,
+                                adjust_ipfs=True):
+    metadata = database.get_metadata(which='in')
+
+    df = pd.DataFrame({'Patient': metadata['Patient'].values,
+                       'Group': metadata['Group'].values,
+                       'Start': metadata['Start'].values,
+                       'End': metadata['End'].values,
+                       'Event': metadata['Event'].values,
+                       }).dropna(how='all')
+
+    if group is None:
+        group = df['Group'].unique()
+        group = group[:2]
+        group = np.array([group[1], group[0]])
+
+    df['End'] = df['End'].fillna(datetime.datetime.now())
+    df['Event'] = df['Event'].fillna(0)
+
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
+    df['Time'] = df['Time'] / (365 / 12)
+
+    df = df[~(df['Time'].isna())]
+
+    if event == 'PFS':
+        patients = database.get_patients()
+
+        for patient in patients:
+            volume = patient.get_data(metric)
+            lesion = patient.get_lesion(metric)
+
+            if (not lesion.empty) & (not volume.empty):
+                time, response = compute_revised_RECIST(volume, lesion)
+
+                if 'PD' in response.values:
+                    t = time[list(response.values[0]).index('PD')]
+                    if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
+                        df.loc[df['Patient'] == patient.id, 'Time'] = t
+                        df.loc[df['Patient'] == patient.id, 'Event'] = 1
+
+                if adjust_ipfs & (visits is not None):
+                    if False in [True if i in response.columns else False for i in
+                                 visits[:(len(response.columns) - 1)]]:
+                        t = time[[True if i in response.columns else False
+                                  for i in visits[:(len(response.columns) - 1)]].index(False) + 1]
+                        if t < float(df.loc[df['Patient'] == patient.id, 'Time']):
+                            df.loc[df['Patient'] == patient.id, 'Time'] = t
+                            df.loc[df['Patient'] == patient.id, 'Event'] = 0
+
+    if followup_time is not None:
+        df.loc[df['Time'] > followup_time, 'Event'] = 0
+        df.loc[df['Time'] > followup_time, 'Time'] = followup_time
+
+    df = df.replace(group[0], 0).replace(group[1], 1)
+
+    Dmin = list(np.arange(0, 1.01, .01))
+
+    figure = Figure(1)
+    ax = figure.get_axes()[0, 0]
+
+    cp = np.array(power_probability(df, n_total, Dmin=Dmin, condition='CP', success='clinical')) * 100
+    ppos = np.array(power_probability(df, n_total, Dmin=Dmin, condition='PPoS', success='clinical')) * 100
+    pos = np.array(power_probability(df, n_total, Dmin=Dmin, condition='PoS', success='clinical')) * 100
+
+    ax.plot(100 * (1 - np.array(Dmin)), cp, label='CP')
+    ax.plot(100 * (1 - np.array(Dmin)), ppos, label='PPoS')
+    ax.plot(100 * (1 - np.array(Dmin)), pos, label='PoS')
+
+    plt.fill_between(100 * (1 - np.array(Dmin)),
+                     np.min(np.array((cp, ppos, pos)), axis=0), np.max(np.array((cp, ppos, pos)), axis=0),
+                     color="gray", alpha=0.25)
+
+    ax.plot([0, 100], [50, 50], color='black', linewidth=1)
+    ax.plot(np.array([1, 1]) * (1 - Dmin[np.argmin(abs(cp - 50))]) * 100, [0, 50], color='black', linewidth=1)
+
+    ax.set_xticks(list(ax.get_xticks()) + [(1 - Dmin[np.argmin(abs(cp - 50))]) * 100])
+
+    ax.set_xlabel('Minimum effect on hazard ratio (%)')
+    ax.set_ylabel('Probability (%)')
+
+    ax.set_xlim([0, 100])
+    ax.set_ylim([0, 100])
 
     figure.config()
     return figure

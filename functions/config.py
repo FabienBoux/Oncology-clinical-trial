@@ -33,8 +33,7 @@ class Config:
         for section in self.config.sections():
             if key in self.config[section]:
                 return True
-            else:
-                False
+        return False
 
     def get_value(self, key, section=None):
         if section is not None:

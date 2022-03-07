@@ -20,19 +20,21 @@ group_labels = group.unique()
 list_selected = ['Age', 'Cancer type', 'ECOG PS', 'Gender', 'Number of metastases',
                  'Presence of extracranial metastases at inclusion']
 
-probability_of_success(database, 100, event='PFS', metric='Diameter')
+# probability_of_success_plot(database, 100, event='PFS', metric='Diameter')
+#
+# probability_of_success(database, 100, event='PFS', metric='Diameter')
+#
+# test = power_probability(pd.DataFrame([]), 100, alpha=.05, condition='PPoS', ratio=1)
+#
+# t1 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='OS',
+#                   metric='Diameter', visits=None, adjust_ipfs=True)
+# t2 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='PFS',
+#                   metric='Diameter', visits=None, adjust_ipfs=True)
 
-test = power_probability(pd.DataFrame([]), 100, alpha=.05, condition='PPoS', ratio=1)
-
-t1 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='OS',
-                  metric='Diameter', visits=None, adjust_ipfs=True)
-t2 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='PFS',
-                  metric='Diameter', visits=None, adjust_ipfs=True)
-
-fig = forest_plot(database, list_selected, model='lnHR', followup_time=None, groups=['WBRT', 'AGuIX'], n_min=5)
+# fig = forest_plot(database, list_selected, model='TR', followup_time=None, groups=['WBRT', 'AGuIX'], n_min=5)
 # fig = swimmer_plot(database, followup_time=12, followup_visits=['W6', 'M3', 'M6', 'M9', 'M12'], metric='Diameter', groups =['WBRT','AGuIX'])
 # fig = response_rate_plot(database, visits=['W6', 'M3', 'M6'], criteria='mRECIST', metric='Diameter')
-# fig = volumetry_plot(database, visits=['W6', 'M3', 'M6', 'M9', 'M12'], stat='mean', metric='Diameter')
+fig = volumetry_plot(database, visits=['W6', 'M3', 'M6', 'M9', 'M12'], stat='mean', metric='Diameter')
 
 # fig = kaplan_meier_plot(database, followup_time=12, event='OS', adjust_ipfs=True, metric="Diameter",
 #                         visits=config.get_value('visits'))

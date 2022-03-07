@@ -237,20 +237,39 @@ def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1, success
     delta_d = cph.hazard_ratios_[0]
     Delta_1 = 1
 
-    r = sqrt((ratio + 1) ** 2 / ratio)
-    if success == 'trial':
-        # for details, see: https://eclass.uoa.gr/modules/document/file.php/MATH301/PracticalSession3/LanDeMets.pdf
-        y = stats.norm.ppf(1 - alpha, loc=0, scale=1)
-    elif success == 'clinical':
+    if (type(Dmin) is list) & (success == 'clinical'):
+        r = sqrt((ratio + 1) ** 2 / ratio)
         k = 2 / sqrt(d)  # equivalent to cph.standard_errors_
-        y = - np.log(Dmin) / k
+        y = [- np.log(i) / k for i in Dmin]
 
-    Delta_0 = delta_d
-    sigma_0 = 2 / sqrt(d)
+        Delta_0 = delta_d
+        sigma_0 = 2 / sqrt(d)
 
-    if condition == 'CP':
-        return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(D / (D - d)))
-    elif condition == 'PPoS':
-        return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(d / (D - d)))
+        if condition == 'CP':
+            return [stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * i) * sqrt(D / (D - d)))
+                    for i in y]
+        elif condition == 'PPoS':
+            return [stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * i) * sqrt(d / (D - d)))
+                    for i in y]
+        else:
+            return [stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * i) / sqrt(D * sigma_0 ** 2 + r ** 2))
+                    for i in y]
+
     else:
-        return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / sqrt(D * sigma_0 ** 2 + r ** 2))
+        r = sqrt((ratio + 1) ** 2 / ratio)
+        if success == 'trial':
+            # for details, see: https://eclass.uoa.gr/modules/document/file.php/MATH301/PracticalSession3/LanDeMets.pdf
+            y = stats.norm.ppf(1 - alpha, loc=0, scale=1)
+        elif success == 'clinical':
+            k = 2 / sqrt(d)  # equivalent to cph.standard_errors_
+            y = - np.log(Dmin) / k
+
+        Delta_0 = delta_d
+        sigma_0 = 2 / sqrt(d)
+
+        if condition == 'CP':
+            return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(D / (D - d)))
+        elif condition == 'PPoS':
+            return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(d / (D - d)))
+        else:
+            return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / sqrt(D * sigma_0 ** 2 + r ** 2))
