@@ -75,6 +75,16 @@ class Config:
 
             self.set_value(val, key='list_metadata', section='METADATA')
 
+        if key == 'list_data':
+            parameters = list()
+            for filename in os.listdir(os.path.join(self.get_value('database', section='PATH'), 'data')):
+                xls = pd.ExcelFile(os.path.join(self.get_value('database', section='PATH'), 'data', filename))
+                parameters = parameters + xls.sheet_names
+
+                val = list(set(parameters))
+
+            self.set_value(val, key='list_data', section='DATA')
+
         if key == 'followup':
             # TODO: correct next code
             # metadata = pd.read_excel(self.get_value('followup', section='OTHER'))

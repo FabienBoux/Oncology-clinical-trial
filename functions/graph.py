@@ -1,17 +1,27 @@
 import datetime
+import warnings
 
 import numpy as np
 import pandas as pd
+import seaborn as sn
 
 from lifelines import CoxPHFitter, KaplanMeierFitter, WeibullFitter, WeibullAFTFitter
 from lifelines.plotting import add_at_risk_counts
 from lifelines.statistics import logrank_test, proportional_hazard_test
 from matplotlib import pyplot as plt
+from scipy.stats import kstest, mannwhitneyu
+from sklearn.decomposition import PCA
+from sklearn.ensemble import IsolationForest
+from sklearn.manifold import TSNE
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from zepid import RiskRatio
 from zepid.graphics import EffectMeasurePlot
 
 from clinlib.displaying import Figure
-from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time, power_probability
+from functions.table import correlation_table
+from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_time, power_probability, \
+    get_multiparametric_signature
 
 
 def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume', groups=None):
@@ -136,7 +146,9 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
 
     if followup_visits is not None:
         ax.set_xticks([0] + list(np.array(visit_to_time(followup_visits)) / (365 / 12)))
-        ax.set_xticklabels(['0'] + followup_visits)
+        ax.set_xticklabels(["{:g} ({})".format(round(a, 1), b) for a, b in
+                            zip([0] + list(np.array(visit_to_time(followup_visits)) / (365 / 12)),
+                                ['0'] + followup_visits, )])
 
     ax.set_yticks(r2)
     ax.set_yticklabels(list(df['Patient'][v].values))
@@ -150,7 +162,6 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     ax.grid(True, which='major', axis='x', linestyle='--')
     ax.grid(False, axis='y')
     # ax.legend(loc='center left', bbox_to_anchor=(1, 0.7))
-
     return figure
 
 
@@ -358,23 +369,33 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                 ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
                             label="20-80 quantiles")
 
-    # for t in range(1, len(tt)):
-    #     if stat == 'mean':
-    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.45, '  {:.1f}%'.format(100 * (y_rt[t] - y_ax[t]) / y_rt[t]))
-    #     else:
-    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.45, '  {:.1f}%'.format(100 * (z_rt[t] - z_ax[t]) / z_rt[t]))
-    #     if (n_rt[t] > 3) & (n_ax[t] > 3):
-    #         plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.25, ' p = {:.2f}'.format(pval[t]))
-    #     plt.text(x_ax[t] - 0.5, plt.ylim()[1] * 1.05, 'n = {}$^*$/ {}$^°$'.format(int(n_rt[t]), int(n_ax[t])))
+        # kstest(y, 'norm')
+        if g == 0:
+            y_ref = y
+            val_ref = df[df['Group'] == groups[g]][visits].values.transpose()
+        else:
+            val = df[df['Group'] == groups[g]][visits].values.transpose()
+            diff = 100 * (y_ref - y) / y_ref
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(visits)
+            for t in range(len(y)):
+                pval = mannwhitneyu(val_ref[t][~np.isnan(val_ref[t])], val[t][~np.isnan(val[t])]).pvalue
 
-    ax.set_xlabel('Times (months)')
-    ax.set_ylabel('Changes in sum of the size of lesions\ncompared to baseline (%)')
-    ax.set_xlim([0, max(x) + 0.05])
+                plt.text(x[t], y[t] + (8 if diff[t] > 0 else - 8),
+                         "{:+.1f}\n(p={:.2f})".format(diff[t], pval), ha='center', va='center')
 
-    figure.config()
+    for t in range(len(visits)):
+        plt.text(x[t], plt.ylim()[1] + 5, 'n= {}'.format(len(val_ref[t][~np.isnan(val_ref[t])])) + ''.join(
+            ['/{}'.format(list(df[['Group', visits[t]]].dropna()['Group'].values).count(gr)) for gr in groups[1:]]),
+                 ha='center', va='center')
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(["{:g} ({})".format(round(x[i], 1), visits[i]) for i in range(len(visits))])
+
+        ax.set_xlabel('Times (months) / Sessions')
+        ax.set_ylabel('Changes in sum of the size of lesions\ncompared to baseline (%)')
+        ax.set_xlim([min(x) - 0.5, max(x) + 0.5])
+
+        figure.config()
     return figure
 
 
@@ -652,4 +673,115 @@ def probability_of_success_plot(database, n_total, followup_time=None, group=Non
     ax.set_ylim([0, 100])
 
     figure.config()
+    return figure
+
+
+def correlation_matrix_plot(database, list_data, visit=None, threshold=False):
+    tab = correlation_table(database, list_data, visit=visit)
+
+    figure = Figure(1)
+    ax = figure.get_axes()[0, 0]
+
+    if not tab.empty:
+        if threshold:
+            tab = abs(tab)
+            tab = 0 * (tab < .25) + .25 * ((.25 <= tab) & (tab < .5)) + .5 * ((.5 <= tab) & (tab < .75)) + .75 * (
+                    .75 <= tab)
+
+            sn.heatmap(tab, ax=ax, annot=False, cbar_kws={'label': 'Classification of Pearson correlation (r)'})
+
+            c_bar = ax.collections[0].colorbar
+            c_bar.set_ticks([0, .25, .5, .75])
+            c_bar.set_ticklabels(['No', 'Weak', 'Moderate', 'Strong'])
+
+        else:
+            sn.heatmap(tab, ax=ax, annot=True, fmt=".2", annot_kws={'size': 10}, vmin=-1, vmax=1,
+                       cbar_kws={'label': 'Pearson correlation (r)'})
+
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=45)
+    else:
+        warnings.warn('No data to show.')
+
+    figure.config()
+    return figure
+
+
+def dim_reduction_plot(database, list_data, visit=None, method='PCA', outliers=0, groups=None):
+    metadata = database.get_metadata(which='all')
+    metadata = metadata[['Patient', 'Group']]
+    patients = database.get_patients()
+
+    df = pd.DataFrame([])
+    patient_id = np.array([])
+    patient_group = np.array([])
+    for pat in patients:
+        d = get_multiparametric_signature(pat, session=visit, parameters=list_data)
+        df = pd.concat((df, d)).reset_index(drop=True)
+        patient_id = np.concatenate((patient_id, np.array([pat.id] * len(d))))
+        patient_group = np.concatenate(
+            (patient_group, np.array([metadata.loc[metadata['Patient'] == pat.id, 'Group'].values[0]] * len(d))))
+
+    data = df.dropna().reset_index(drop=True)
+    patient_id = patient_id[~(df.isna().any(axis=1))]
+    patient_group = patient_group[~(df.isna().any(axis=1))]
+    if (len(data) / len(df)) < .8:
+        print("Warning: {}% of data have been removed because containing NaN values.".format(
+            round(100 * len(data) / len(df), 1)))
+        print("         Consider ignoring the parameters that cause such a reduction.")
+
+    if groups is None:
+        groups = sorted(list(set(patient_group)))
+
+    # Dimension reduction
+    X = np.array([data.loc[i].values for i in range(len(data))])
+
+    if method == 'PCA':
+        pca = Pipeline([('scaling', StandardScaler()), ('pca', PCA(n_components=2))])
+        X_embedded = pca.fit_transform(X)
+
+    if method == 't-SNE':
+        tsne = Pipeline([('scaling', StandardScaler()), ('tsne', TSNE(n_components=2))])
+        X_embedded = tsne.fit_transform(X)
+
+    X_ = np.array([x[0] for x in X_embedded])
+    Y_ = np.array([x[1] for x in X_embedded])
+
+    figure = Figure(2, nb_columns=1)
+    axs = figure.get_axes().reshape(-1)
+    col = figure.get_colors()
+    colors = figure.get_colors(len(patients))
+    markers = ['o', '^', 'v', '8', 's', 'P', '*', 'h', 'D', 'X']
+
+    for i in range(len(patients)):
+        if (patient_id == patients[i].id).any():
+            axs[0].scatter(X_[patient_id == patients[i].id], Y_[patient_id == patients[i].id],  # s=size[v]
+                           color=colors[i], alpha=0.75, marker=markers[np.random.randint(len(markers))],
+                           label=patients[i].id)
+    for i in range(len(groups)):
+        axs[1].scatter(X_[patient_group == groups[i]], Y_[patient_group == groups[i]],  # s=size[v]
+                       color=col[i], alpha=0.75, label=groups[i])
+
+    if outliers > 0:
+        # Automatic outlier detection algorithm
+        # for details, see: https://machinelearningmastery.com/model-based-outlier-detection-and-removal-in-python/
+        iso = IsolationForest(contamination=outliers / 100)
+        yhat = iso.fit_predict(X)
+
+        axs[0].plot(X_[yhat == -1], Y_[yhat == -1], 'x', color='black', label='Outliers')
+        axs[1].plot(X_[yhat == -1], Y_[yhat == -1], 'x', color='black', label='Outliers')
+
+    if method == 'PCA':
+        var_explained = pca.get_params()['pca'].explained_variance_ratio_
+
+        axs[1].set_xlabel('Principal component 1 ({:.1f}%)'.format(100 * var_explained[0]))
+        axs[0].set_ylabel('Principal component 2 ({:.1f}%)'.format(100 * var_explained[1]))
+        axs[1].set_ylabel('Principal component 2 ({:.1f}%)'.format(100 * var_explained[1]))
+    else:
+        axs[1].set_xlabel('Dimension 1')
+        axs[0].set_ylabel('Dimension 2')
+        axs[1].set_ylabel('Dimension 2')
+
+    figure.config()
+    axs[0].legend(bbox_to_anchor=(0.98, 1.0, 0.2, 0), loc='upper left')
     return figure

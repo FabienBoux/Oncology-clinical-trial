@@ -3,7 +3,8 @@ import datetime
 import numpy as np
 import pandas as pd
 
-from functions.utils import sample_size_calculation, predictive_probability, compute_revised_RECIST, power_probability
+from functions.utils import sample_size_calculation, predictive_probability, compute_revised_RECIST, power_probability, \
+    get_multiparametric_signature
 
 
 def sample_size_table(database, followup_time=None, group=None, criteria='HR', event='OS', metric='Volume', visits=None,
@@ -130,3 +131,13 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
 
     # return predictive_probability(df, n_total)
     return pd.DataFrame(data=dat, columns=['Probabilities (%)'], index=['PoS', 'CP', 'PPoS', 'Overall'])
+
+
+def correlation_table(database, list_data, visit='Baseline'):
+    patients = database.get_patients()
+    df = pd.DataFrame([])
+    for pat in patients:
+        df = pd.concat(
+            (df, get_multiparametric_signature(pat, session=visit, parameters=list_data))).reset_index(drop=True)
+
+    return df.corr()

@@ -96,6 +96,7 @@ def compute_revised_RECIST(volume, lesion):
     idx = [True if x in lesion[lesion].index else False for x in list(volume['VOI'].values)]
     time, evol_bl = compute_evolution(volume[idx], reference='baseline')
     time, evol_nd = compute_evolution(volume[idx], reference='nadir')
+
     _, vol = compute_sum(volume[idx])
     val = vol.copy().values[0]
     for i in range(1, len(vol.columns)):
@@ -105,11 +106,11 @@ def compute_revised_RECIST(volume, lesion):
         if (evol_nd[ses].values[0] >= 20) & (vol[ses] > 5).any():
             evol_bl[ses] = 'PD'
 
-        elif evol_bl[ses].values[0] <= -30:
-            evol_bl[ses] = 'PR'
-
         elif (evol_bl[ses].values[0] <= -100) & (volume[volume['Session'] == ses]['Value'] < 10).all():
             evol_bl[ses] = 'CR'
+
+        elif evol_bl[ses].values[0] <= -30:
+            evol_bl[ses] = 'PR'
 
         else:
             evol_bl[ses] = 'SD'
@@ -273,3 +274,96 @@ def power_probability(df, n_final, alpha=.05, condition='PPoS', ratio=1, success
             return stats.norm.cdf(1 / r * (sqrt(D) * np.log(Delta_1 / delta_d) - r * y) * sqrt(d / (D - d)))
         else:
             return stats.norm.cdf((sqrt(D) * np.log(Delta_1 / Delta_0) - r * y) / sqrt(D * sigma_0 ** 2 + r ** 2))
+
+
+def get_formated_data(patient, parameters=None, features=None, norm=False):
+    """
+    Used to create and format a structure of data from the .xlsx file data
+    """
+    params = parameters.copy()
+    if features is None:
+        features = ['Mean']
+    if type(params) is str:
+        params = [params]
+    data = patient.get_data(parameters=params)
+
+    if 'd+D' in params:
+        params.remove('d+D')
+        params.insert(0, 'diameter')
+        params.insert(0, 'Diameter')
+        data['diameter'] = data['d+D']
+        data['Diameter'] = data['d+D']
+
+    column = 'Session'
+    index = 'VOI'
+    for par in params:
+        if par == 'Diameter':
+            data[par] = data[par].rename(columns={'D (mm)': 'Mean'})
+            data[par]['Std'] = np.nan
+        if par == 'diameter':
+            data[par] = data[par].rename(columns={'d (mm)': 'Mean'})
+            data[par]['Std'] = np.nan
+        if par == 'Volume':
+            data[par] = data[par].rename(columns={'Value (cc)': 'Mean'})
+            data[par]['Std'] = np.nan
+
+        if not data[par].empty:
+            dat = pd.DataFrame([], columns=data[par][column].unique(),
+                               index=pd.MultiIndex.from_product([features, data[par][index].unique()],
+                                                                names=['Feature', index]), dtype=float)
+            for session in dat.columns:
+                for f in features:
+                    if len(data[par][index].unique()) == len(
+                            data[par][data[par][column] == session][index].values):
+                        dat.loc[f].loc[dat.loc[f].index, session] = data[par][data[par][column] == session][
+                            f].values
+                    else:
+                        for voi in data[par][data[par][column] == session][index].values:
+                            dat.loc[f].loc[voi, session] = \
+                                data[par][(data[par][column] == session) & (data[par][index] == voi)][f].values[
+                                    0]
+        else:
+            dat = data[par]
+
+        data[par] = dat
+    return data
+
+
+def get_multiparametric_signature(patient, session='Baseline', parameters=None, features=None):
+    if features is None:
+        features = ['Mean']
+    if parameters is None:
+        parameters = ['T1', 'SE', 'SWI', 'ADC', 'FLAIR']
+    data = get_formated_data(patient, parameters=parameters, features=features, norm=True)
+
+    d = dict()
+    empty_params = list()
+    for param in list(data.keys()):
+        if (not data[param].empty) & (list(data[param].columns).count(session) > 0):
+            dt = data[param].loc[features[0], session]
+
+            # Used ADC values given in an other unit
+            if (param == 'ADC') & (not (200 < dt.mean() < 2000)):
+                dt = dt * 1000
+
+            # Used for qualitative parameters
+            if param in ['T1', 'SWI', 'FLAIR']:
+                dt = dt[dt.index != 'Norm'] / dt[dt.index == 'Norm'].values[0]
+            # Used for quantitative parameters
+            else:
+                dt = dt[dt.index != 'Norm']
+
+            d[param] = dt.values
+        else:
+            empty_params = empty_params + [param]
+
+    for param in empty_params:
+        if 'dt' in locals():
+            d[param] = np.array([np.nan] * len(dt.index))
+        else:
+            return pd.DataFrame([])
+
+    try:
+        return pd.DataFrame(d, index=dt.index.values)
+    except:
+        return pd.DataFrame([])
