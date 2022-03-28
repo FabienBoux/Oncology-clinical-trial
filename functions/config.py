@@ -54,6 +54,10 @@ class Config:
                 if key in self.config[section]:
                     return self.config.remove_option(section, key)
 
+    def remove_section(self, section):
+        if section is not None:
+            return self.config.remove_section(section)
+
     def set_value(self, val, key, section=None):
         if section is None:
             section = 'OTHER'

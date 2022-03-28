@@ -287,21 +287,14 @@ def get_formated_data(patient, parameters=None, features=None, norm=False):
         params = [params]
     data = patient.get_data(parameters=params)
 
-    if 'd+D' in params:
-        params.remove('d+D')
-        params.insert(0, 'diameter')
-        params.insert(0, 'Diameter')
-        data['diameter'] = data['d+D']
-        data['Diameter'] = data['d+D']
-
     column = 'Session'
     index = 'VOI'
     for par in params:
         if par == 'Diameter':
-            data[par] = data[par].rename(columns={'D (mm)': 'Mean'})
+            data[par] = data[par].rename(columns={'Value': 'Mean'})
             data[par]['Std'] = np.nan
-        if par == 'diameter':
-            data[par] = data[par].rename(columns={'d (mm)': 'Mean'})
+        if par == 'd':
+            data[par] = data[par].rename(columns={'Value': 'Mean'})
             data[par]['Std'] = np.nan
         if par == 'Volume':
             data[par] = data[par].rename(columns={'Value (cc)': 'Mean'})
@@ -320,8 +313,7 @@ def get_formated_data(patient, parameters=None, features=None, norm=False):
                     else:
                         for voi in data[par][data[par][column] == session][index].values:
                             dat.loc[f].loc[voi, session] = \
-                                data[par][(data[par][column] == session) & (data[par][index] == voi)][f].values[
-                                    0]
+                                data[par][(data[par][column] == session) & (data[par][index] == voi)][f].values[0]
         else:
             dat = data[par]
 

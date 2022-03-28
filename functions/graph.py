@@ -363,8 +363,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
             else:
                 ax.plot(x, y, '--', color=colors[g], linewidth=4, label="Median group {}".format(groups[g]))
                 ax.errorbar(x, y, np.vstack([y - err_low, err_high - y]), fmt='none', color=colors[g], elinewidth=2,
-                            capsize=10,
-                            capthick=2)
+                            capsize=10, capthick=2)
             if g == 1:
                 ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
                             label="20-80 quantiles")
@@ -381,7 +380,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                 pval = mannwhitneyu(val_ref[t][~np.isnan(val_ref[t])], val[t][~np.isnan(val[t])]).pvalue
 
                 plt.text(x[t], y[t] + (8 if diff[t] > 0 else - 8),
-                         "{:+.1f}\n(p={:.2f})".format(diff[t], pval), ha='center', va='center')
+                         "{:+.1f}%\n(p={:.2f})".format(diff[t], pval), ha='center', va='center')
 
     for t in range(len(visits)):
         plt.text(x[t], plt.ylim()[1] + 5, 'n= {}'.format(len(val_ref[t][~np.isnan(val_ref[t])])) + ''.join(
@@ -519,8 +518,8 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
 
 
 def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=None, metric='Volume', groups=None):
-    cutoff_date = (datetime.datetime.now() if cutoff_date is None
-                   else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
+    cutoff_date = (
+        datetime.datetime.now() if cutoff_date is None else datetime.datetime.strptime(cutoff_date, '%d/%m/%y'))
 
     metadata = database.get_metadata(which='all')
 
@@ -532,6 +531,7 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
     for p in range(len(patients)):
         volume = patients[p].get_data(metric)
         lesion = patients[p].get_lesion(metric)
+        volume = volume[volume['Study'] < cutoff_date]
 
         if (not lesion.empty) & (not volume.empty):
             if criteria == 'rRECIST':
@@ -784,4 +784,44 @@ def dim_reduction_plot(database, list_data, visit=None, method='PCA', outliers=0
 
     figure.config()
     axs[0].legend(bbox_to_anchor=(0.98, 1.0, 0.2, 0), loc='upper left')
+    return figure
+
+
+def evolution_plot(database, data, visit=None, metric='Volume', groups=None):
+    metadata = database.get_metadata(which='all')
+    metadata = metadata[['Patient', 'Group']]
+    patients = database.get_patients()
+
+    if groups is None:
+        groups = sorted(list(metadata['Group'].dropna().unique()))
+
+    figure = Figure(len(visit) - 1, sharex=True, sharey=True)
+    axs = figure.get_axes()
+
+    for v in range(1, len(visit)):
+        df = pd.DataFrame([])
+        patient_id = np.array([])
+        patient_group = np.array([])
+        for pat in patients:
+            d = get_multiparametric_signature(pat, session=visit[v], parameters=[metric])
+            d0 = get_multiparametric_signature(pat, session=visit[0], parameters=[metric, data])
+            if (len(d) != 0) & (len(d0) != 0):
+                d.insert(loc=0, column='V0', value=d0[metric])
+                d.insert(loc=1, column='Parameter', value=d0[data])
+                df = pd.concat((df, d)).reset_index(drop=True)
+                patient_id = np.concatenate((patient_id, np.array([pat.id] * len(d))))
+                patient_group = np.concatenate((patient_group, np.array(
+                    [metadata.loc[metadata['Patient'] == pat.id, 'Group'].values[0]] * len(d))))
+
+        ax = axs[(v - 1) // figure.nb_columns, (v - 1) % figure.nb_columns]
+        for g in groups:
+            dat = df[patient_group == g]
+            ax.scatter(dat['Parameter'], dat[metric] / dat['V0'], s=5 * dat['V0'] / dat['V0'][dat['V0'] > 0].median(),
+                       alpha=0.8, label=g)
+        ax.set_ylim(max(0, ax.get_ylim()[0]), min(4, ax.get_ylim()[1]))
+        ax.set_xlabel(data)
+        if v == 1:
+            ax.set_ylabel('Normalized volume')
+
+    figure.config()
     return figure
