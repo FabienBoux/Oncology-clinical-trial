@@ -1,6 +1,8 @@
 import os
 import configparser
 import ast
+import warnings
+
 import pandas as pd
 
 
@@ -35,15 +37,28 @@ class Config:
                 return True
         return False
 
+    def set_value(self, val, key, section=None):
+        if section is None:
+            section = 'OTHER'
+        if type(val) is list:
+            val = str(val)
+
+        if not self.is_section(section):
+            self.config.add_section(section)
+        self.config.set(section, key, val)
+
     def get_value(self, key, section=None):
         if section is not None:
-            val = self.config[section][key]
-            return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
-        else:
-            for section in self.config.sections():
-                if key in self.config[section]:
-                    val = self.config[section][key]
-                    return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
+            if section in self.config.sections():
+                val = self.config[section][key]
+                return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
+            else:
+                warnings.warn('Invalid section: ignore this argument and scan the other sections.')
+
+        for section in self.config.sections():
+            if key in self.config[section]:
+                val = self.config[section][key]
+                return ast.literal_eval(val) if (val.startswith('[') & val.endswith(']')) else val
 
     def remove_value(self, key, section=None):
         if section is not None:
@@ -57,16 +72,6 @@ class Config:
     def remove_section(self, section):
         if section is not None:
             return self.config.remove_section(section)
-
-    def set_value(self, val, key, section=None):
-        if section is None:
-            section = 'OTHER'
-        if type(val) is list:
-            val = str(val)
-
-        if not self.is_section(section):
-            self.config.add_section(section)
-        self.config.set(section, key, val)
 
     def extract_config_values(self, key):
         if key == 'list_metadata':

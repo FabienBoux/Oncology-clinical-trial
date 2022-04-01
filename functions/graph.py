@@ -1,5 +1,6 @@
 import datetime
 import warnings
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -24,18 +25,16 @@ from functions.utils import compute_evolution, compute_revised_RECIST, visit_to_
     get_multiparametric_signature
 
 
-def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume', groups=None):
+def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Volume', groups=None, groupby=None):
     metadata = database.get_metadata(which='all')
 
-    df = pd.DataFrame({'Patient': metadata['Patient'].values,
-                       'Group': metadata['Group'].values,
-                       'Start': metadata['Start'].values,
-                       'End': metadata['End'].values,
-                       'Event': metadata['Event'].values,
-                       }).dropna(how='all')
+    mt = ['Patient', 'Group', 'Start', 'End', 'Event']
+    if 'Expected' in metadata.columns:
+        mt.append('Expected')
+    if groupby in metadata.columns:
+        mt.append(groupby)
 
-    if 'Expected' in df.columns:
-        pd.concat((df, metadata['Expected']), axis=1)
+    df = metadata[mt].dropna(how='all')
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
 
@@ -58,7 +57,10 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     ax = figure.get_axes()[0, 0]
     colors = figure.get_colors()
 
-    df = df.sort_values(['Time']).reset_index(drop=True)
+    if groupby in df.columns:
+        df = df.sort_values([groupby, 'Time']).reset_index(drop=True)
+    else:
+        df = df.sort_values(['Time']).reset_index(drop=True)
 
     if 'Expected' in df.columns:
         df['Expected'][df['Expected'].isna()] = 0
@@ -75,13 +77,13 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     r1 = np.array([x - barWidth / 4 for x in r2])
     r2 = np.array([x + barWidth / 2 for x in r2])
 
-    # TODO: add cause of death if available
-    # jumps = list(Counter(df['cause']).values())
-    # jumps.reverse()
-    # jumps = np.array(jumps).cumsum()
-    # for i in range(len(jumps) - 1):
-    #     r1[-(jumps[i]):] = r1[-(jumps[i]):] + 1
-    #     r2[-(jumps[i]):] = r2[-(jumps[i]):] + 1
+    if groupby in df.columns:
+        jumps = list(Counter(df[groupby]).values())
+        jumps.reverse()
+        jumps = np.array(jumps).cumsum()
+        for i in range(len(jumps) - 1):
+            r1[-(jumps[i]):] = r1[-(jumps[i]):] + 1
+            r2[-(jumps[i]):] = r2[-(jumps[i]):] + 1
 
     censored = df['Event'][v].isna()
 
@@ -130,10 +132,18 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
                 previous_resp = resp
                 prev_t = t
 
-            if followup_visits is not None:
-                if flwt:
-                    tt = np.array([x for x in visit_to_time(flwt) if (x <= y2[p] * (365 / 12)) & (x > 0)]) / (365 / 12)
-                    ax.scatter(tt, [r2[p]] * len(tt), color='black', marker='$?$', zorder=20)
+        if followup_visits is not None:
+            if flwt:
+                tt = np.array([x for x in visit_to_time(flwt) if (x <= y2[p] * (365 / 12)) & (x > 0)]) / (365 / 12)
+                ax.scatter(tt, [r2[p]] * len(tt), color='black', marker='$?$', zorder=20)
+
+    if groupby in df.columns:
+        c = 0
+        jumps = list(Counter(df[groupby]).values())
+        for i in range(len(jumps)):
+            ax.plot([-0.2, - 0.2], [c - 0.1, c + jumps[i] - 0.5], color='black')
+            plt.text(-0.5, c + 0.2, '{}'.format(df[groupby].unique()[i]), rotation=90, fontsize='medium')
+            c = c + jumps[i] + 1
 
     ax.plot(np.nan, np.nan, ">", color='black', label='Censored patient')
     ax.plot(np.nan, np.nan, '.', color='green', label='Partial Response (PR)')
@@ -155,7 +165,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
 
     ax.set_xlabel('Time (months) / Follow-up visit')
     ax.set_ylabel('Patients (n = {})'.format(v.sum()))
-    ax.set_xlim([ax.get_xlim()[0], followup_time + 0.2])
+    ax.set_xlim([ax.get_xlim()[0] - 0.2, followup_time + 0.2])
     ax.set_ylim([r2[0] - barWidth, r2[-1] + barWidth])
 
     figure.config()
@@ -168,16 +178,16 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
 def forest_plot(database, list_metadata, model='HR', followup_time=None, groups=None, n_min=5):
     metadata = database.get_metadata(which='all')
 
-    df = pd.DataFrame({'Patient': metadata['Patient'].values,
-                       'Group': metadata['Group'].values,
-                       'Start': metadata['Start'].values,
-                       'End': metadata['End'].values,
-                       'Event': metadata['Event'].values,
-                       }).dropna(how='all')
+    df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
     df = pd.concat((df, metadata[list_metadata]), axis=1)
 
     if groups is None:
         groups = sorted(list(df['Group'].dropna().unique()))
+    if len(groups) < 2:
+        warnings.warn('Only 1 group provided, required at least 2 groups: ignore figure.')
+        return
+    elif len(groups) > 2:
+        warnings.warn('More than 2 groups provided: figure will only consider the 2 first groups.')
         groups = groups[:2]
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
@@ -408,6 +418,9 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
 
     if groups is None:
         groups = sorted(list(df['Group'].dropna().unique()))
+    if len(groups) < 2:
+        warnings.warn('Only 1 group, required at least 2 groups: ignore figure.')
+        return
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
 

@@ -1,1 +1,1 @@
-real.ini
+nanosmart.ini
