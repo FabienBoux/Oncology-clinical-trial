@@ -10,13 +10,7 @@ from functions.utils import sample_size_calculation, predictive_probability, com
 def sample_size_table(database, followup_time=None, group=None, criteria='HR', event='OS', metric='Volume', visits=None,
                       adjust_ipfs=True):
     metadata = database.get_metadata(which='in')
-
-    df = pd.DataFrame({'Patient': metadata['Patient'].values,
-                       'Group': metadata['Group'].values,
-                       'Start': metadata['Start'].values,
-                       'End': metadata['End'].values,
-                       'Event': metadata['Event'].values,
-                       }).dropna(how='all')
+    df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
 
     if group is None:
         group = df['Group'].unique()
@@ -25,8 +19,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
 
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
@@ -71,13 +64,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
 def probability_of_success(database, n_total, followup_time=None, group=None, event='OS', metric='Volume', visits=None,
                            adjust_ipfs=True):
     metadata = database.get_metadata(which='in')
-
-    df = pd.DataFrame({'Patient': metadata['Patient'].values,
-                       'Group': metadata['Group'].values,
-                       'Start': metadata['Start'].values,
-                       'End': metadata['End'].values,
-                       'Event': metadata['Event'].values,
-                       }).dropna(how='all')
+    df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
 
     if group is None:
         group = df['Group'].unique()
@@ -87,8 +74,7 @@ def probability_of_success(database, n_total, followup_time=None, group=None, ev
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
 
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 

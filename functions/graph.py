@@ -37,9 +37,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
     df = metadata[mt].dropna(how='all')
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
-
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
@@ -142,7 +140,7 @@ def swimmer_plot(database, followup_time=None, followup_visits=None, metric='Vol
         jumps = list(Counter(df[groupby]).values())
         for i in range(len(jumps)):
             ax.plot([-0.2, - 0.2], [c - 0.1, c + jumps[i] - 0.5], color='black')
-            plt.text(-0.5, c + 0.2, '{}'.format(df[groupby].unique()[i]), rotation=90, fontsize='medium')
+            plt.text(-0.5, c + 0.4, '{}'.format(df[groupby].unique()[i]), rotation=90, fontsize='medium')
             c = c + jumps[i] + 1
 
     ax.plot(np.nan, np.nan, ">", color='black', label='Censored patient')
@@ -193,8 +191,7 @@ def forest_plot(database, list_metadata, model='HR', followup_time=None, groups=
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
 
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
     df = df[df['Time'] > 0]
@@ -322,6 +319,8 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     patients = database.get_patients()
     for p in range(len(patients)):
         volume = patients[p].get_data(metric)
+        d = patients[p].get_data('d') #TODO: remove these 2 lines or integret them
+        volume['Value'] = volume['Value'] * d['Value']
         lesion = patients[p].get_lesion(metric)
 
         if (not lesion.empty) & (not volume.empty):
@@ -359,8 +358,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                 ax.errorbar(x, y, err, fmt='none', color=colors[g], elinewidth=2, capsize=10, capthick=2)
 
             if g == 1:
-                ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
-                            label="Standard deviations")
+                plt.fill_between([np.nan], [np.nan], [np.nan], color='gray', alpha=0.4, label="Standard deviations")
 
         else:
             y = df[df['Group'] == groups[g]][visits].median().values
@@ -375,8 +373,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
                 ax.errorbar(x, y, np.vstack([y - err_low, err_high - y]), fmt='none', color=colors[g], elinewidth=2,
                             capsize=10, capthick=2)
             if g == 1:
-                ax.errorbar(np.nan, np.nan, np.nan, fmt='none', color='k', elinewidth=2, capsize=10, capthick=2,
-                            label="20-80 quantiles")
+                plt.fill_between([np.nan], [np.nan], [np.nan], color='gray', alpha=0.4, label="20-80 quantiles")
 
         # kstest(y, 'norm')
         if g == 0:
@@ -389,8 +386,9 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
             for t in range(len(y)):
                 pval = mannwhitneyu(val_ref[t][~np.isnan(val_ref[t])], val[t][~np.isnan(val[t])]).pvalue
 
-                plt.text(x[t], y[t] + (8 if diff[t] > 0 else - 8),
-                         "{:+.1f}%\n(p={:.2f})".format(diff[t], pval), ha='center', va='center')
+                if not np.isnan(diff[t]):
+                    plt.text(x[t], y[t] + (8 if diff[t] > 0 else - 8),
+                             "{:+.1f}%\n(p={:.2f})".format(diff[t], pval), ha='center', va='center')
 
     for t in range(len(visits)):
         plt.text(x[t], plt.ylim()[1] + 5, 'n= {}'.format(len(val_ref[t][~np.isnan(val_ref[t])])) + ''.join(
@@ -423,9 +421,7 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
         return
 
     df['End'] = df['End'].fillna(datetime.datetime.now())
-
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
@@ -488,9 +484,10 @@ def kaplan_meier_plot(database, event='OS', followup_time=None, cutoff_date=None
         ax.plot([kmf_model[g].median_survival_time_, kmf_model[g].median_survival_time_], [0, 0.5],
                 '--', alpha=0.9, color=colors[groups.index(g)])
 
+    ax.fill_between([np.nan], [np.nan], color="gray", alpha=0.7, label="95% confidence interval")
     ax.plot([0, followup_time], [0.5, 0.5], '--', color="black", alpha=0.9,
             label=('Median PFS time (mPFST)' if event == 'PFS' else 'Median survival time (mST)'))
-    ax.plot([np.nan], [np.nan], '.', color='k', label='Censored patients')
+    ax.plot([np.nan], [np.nan], '.', color='k', label='Censored patient')
 
     # ax.plot(np.nan, np.nan, '-', color='k',
     #         label='Log-rank test: p={:.2f} (n={})\nwith censored: p={:.2f} (n={})'.format(results.p_value, v.sum(),
@@ -585,7 +582,8 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
                width / len(groups), color=colors[g], edgecolor='black', hatch='//')
 
         for i in np.arange(len(x)):
-            ax.text(x[i] - width / 2 + (g + .5) * width / len(groups), 100 * (pr[i] + cr[i]) / n[i] + 2, str(n[i]))
+            ax.text(x[i] - width / 2 + (g + .5) * width / len(groups), 100 * (pr[i] + cr[i]) / n[i] + 2, str(n[i]),
+                    ha='center')
 
     ax.bar(np.nan, np.nan, width, color='white', edgecolor='black', hatch='//', label='CR')
 
@@ -621,8 +619,7 @@ def probability_of_success_plot(database, n_total, followup_time=None, group=Non
     df['End'] = df['End'].fillna(datetime.datetime.now())
     df['Event'] = df['Event'].fillna(0)
 
-    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24
-    df['Time'] = df['Time'] / (365 / 12)
+    df['Time'] = (df['End'] - df['Start']).dt.total_seconds() / 3600 / 24 / (365 / 12)
 
     df = df[~(df['Time'].isna())]
 
@@ -666,23 +663,42 @@ def probability_of_success_plot(database, n_total, followup_time=None, group=Non
     ppos = np.array(power_probability(df, n_total, Dmin=Dmin, condition='PPoS', success='clinical')) * 100
     pos = np.array(power_probability(df, n_total, Dmin=Dmin, condition='PoS', success='clinical')) * 100
 
-    ax.plot(100 * (1 - np.array(Dmin)), cp, label='CP')
-    ax.plot(100 * (1 - np.array(Dmin)), ppos, label='PPoS')
-    ax.plot(100 * (1 - np.array(Dmin)), pos, label='PoS')
+    # ax.plot(100 * (1 - np.array(Dmin)), cp, label='CP')
+    # ax.plot(100 * (1 - np.array(Dmin)), ppos, label='PPoS')
+    # ax.plot(100 * (1 - np.array(Dmin)), pos, label='PoS')
 
-    plt.fill_between(100 * (1 - np.array(Dmin)),
+    # plt.fill_between(100 * (1 - np.array(Dmin)),
+    #                  np.min(np.array((cp, ppos, pos)), axis=0), np.max(np.array((cp, ppos, pos)), axis=0),
+    #                  color="gray", alpha=0.25)
+    #
+    # ax.plot([0, 100], [50, 50], color='black', linewidth=1)
+    # ax.plot(np.array([1, 1]) * (1 - Dmin[np.argmin(abs(cp - 50))]) * 100, [0, 50], color='black', linewidth=1)
+    #
+    # ax.set_xticks(list(ax.get_xticks()) + [(1 - Dmin[np.argmin(abs(cp - 50))]) * 100])
+    #
+    # ax.set_xlabel('Minimum effect on hazard ratio (%)')
+    # ax.set_ylabel('Probability (%)')
+
+    # ax.set_xlim([0, 100])
+    # ax.set_ylim([0, 100])
+
+    ax.plot(np.array(Dmin), cp, label='CP')
+    ax.plot(np.array(Dmin), ppos, label='PPoS')
+    ax.plot(np.array(Dmin), pos, label='PoS')
+
+    plt.fill_between(np.array(Dmin),
                      np.min(np.array((cp, ppos, pos)), axis=0), np.max(np.array((cp, ppos, pos)), axis=0),
                      color="gray", alpha=0.25)
 
     ax.plot([0, 100], [50, 50], color='black', linewidth=1)
-    ax.plot(np.array([1, 1]) * (1 - Dmin[np.argmin(abs(cp - 50))]) * 100, [0, 50], color='black', linewidth=1)
+    ax.plot(np.array([1, 1]) * (Dmin[np.argmin(abs(cp - 50))]), [0, 50], color='black', linewidth=1)
 
-    ax.set_xticks(list(ax.get_xticks()) + [(1 - Dmin[np.argmin(abs(cp - 50))]) * 100])
+    ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1] + [(Dmin[np.argmin(abs(cp - 50))])])
 
-    ax.set_xlabel('Minimum effect on hazard ratio (%)')
-    ax.set_ylabel('Probability (%)')
+    ax.set_xlabel('HR')
+    ax.set_ylabel('Probability( < HR ) (%)')
 
-    ax.set_xlim([0, 100])
+    ax.set_xlim([0, 1])
     ax.set_ylim([0, 100])
 
     figure.config()

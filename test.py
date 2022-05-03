@@ -5,7 +5,7 @@ from functions.graph import *
 from functions.table import sample_size_table, probability_of_success, correlation_table
 from functions.utils import power_probability
 
-config = Config('ini/nanosmart.ini')
+config = Config('ini/real.ini')
 config.read()
 
 database = Database(config.get_value('database', section='PATH'), idlength=6)
@@ -29,17 +29,16 @@ list_selected = ['Age', 'Cancer type', 'ECOG PS', 'Gender', 'Number of metastase
 #
 # test = power_probability(pd.DataFrame([]), 100, alpha=.05, condition='PPoS', ratio=1)
 #
-# t1 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='OS',
-#                   metric='Diameter', visits=None, adjust_ipfs=True)
 # t2 = sample_size_table(database, followup_time=12, group=None, criteria='HR', event='PFS',
 #                   metric='Diameter', visits=None, adjust_ipfs=True)
 
 # fig = forest_plot(database, list_selected, model='TR', followup_time=None, groups=['WBRT', 'AGuIX'], n_min=5)
-fig = swimmer_plot(database, followup_time=12, followup_visits=['M3', 'M6', 'M9', 'M12'], groupby='Cancer')
-fig = response_rate_plot(database, visits=['M3', 'M6'], criteria='mRECIST', metric='Diameter')
-# fig = volumetry_plot(database, visits=['W6', 'M3', 'M6', 'M9', 'M12'], stat='mean', metric='Diameter')
+# fig = swimmer_plot(database, followup_time=12, followup_visits=['M3', 'M6', 'M9', 'M12'], groupby='Cancer')
+# fig = response_rate_plot(database, visits=['Baseline', 'W6', 'M3', 'M6', 'M9', 'M12'],
+#                          criteria='rRECIST', metric='Diameter', groups=['WBRT','AGuIX'])
+fig = volumetry_plot(database, visits=['W6', 'M3', 'M6', 'M9', 'M12'], stat='mean', metric='Diameter')
 
-fig = evolution_plot(database, 'SE', visit=['Baseline', 'W6', 'M3', 'M6'], metric='Diameter')
+# fig = evolution_plot(database, 'SE', visit=['Baseline', 'W6', 'M3', 'M6'], metric='Diameter')
 
 # fig = correlation_matrix_plot(database, list_data=['ADC', 'FLAIR', 'SWI', 'T1'], visit='Baseline', threshold=True)
 
