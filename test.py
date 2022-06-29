@@ -5,7 +5,7 @@ from functions.graph import *
 from functions.table import sample_size_table, probability_of_success, correlation_table
 from functions.utils import power_probability
 
-config = Config('ini/real.ini')
+config = Config('ini/nanorad2.ini')
 config.read()
 
 database = Database(config.get_value('database', section='PATH'), idlength=6)
@@ -23,7 +23,7 @@ list_selected = ['Age', 'Cancer type', 'ECOG PS', 'Gender', 'Number of metastase
 # fig = dim_reduction_plot(database, list_data=['ADC', 'FLAIR', 'SWI', 'T1'], visit='Baseline', method='PCA',
 #                          outliers=False)
 
-# probability_of_success_plot(database, 100, event='PFS', metric='Diameter')
+t = probability_of_success(database, 100, event='PFS', metric='Diameter', adjust_ipfs=False)
 #
 # probability_of_success(database, 100, event='PFS', metric='Diameter')
 #

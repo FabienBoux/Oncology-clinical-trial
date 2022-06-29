@@ -63,7 +63,7 @@ def sample_size_table(database, followup_time=None, group=None, criteria='HR', e
 
 def probability_of_success(database, n_total, followup_time=None, group=None, event='OS', metric='Volume', visits=None,
                            adjust_ipfs=True):
-    metadata = database.get_metadata(which='in')
+    metadata = database.get_metadata(which='all')
     df = metadata[['Patient', 'Group', 'Start', 'End', 'Event']].dropna(how='all')
 
     if group is None:

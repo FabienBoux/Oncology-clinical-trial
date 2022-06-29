@@ -319,7 +319,7 @@ def volumetry_plot(database, visits=None, which='targets', stat='mean', metric='
     patients = database.get_patients()
     for p in range(len(patients)):
         volume = patients[p].get_data(metric)
-        d = patients[p].get_data('d') #TODO: remove these 2 lines or integret them
+        d = patients[p].get_data('d')  # TODO: remove these 2 lines or integret them
         volume['Value'] = volume['Value'] * d['Value']
         lesion = patients[p].get_lesion(metric)
 
@@ -600,8 +600,7 @@ def response_rate_plot(database, visits=None, criteria='rRECIST', cutoff_date=No
 
 
 def probability_of_success_plot(database, n_total, followup_time=None, group=None, event='OS', metric='Volume',
-                                visits=None,
-                                adjust_ipfs=True):
+                                visits=None, adjust_ipfs=True):
     metadata = database.get_metadata(which='in')
 
     df = pd.DataFrame({'Patient': metadata['Patient'].values,
